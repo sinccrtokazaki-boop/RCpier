@@ -1,0 +1,233 @@
+"""解析モデル・剛性組立・求解
+
+単位系: 長さ mm, 力 N（出力時に kN, kN·m へ換算可能）
+"""
+from collections import defaultdict
+from dataclasses import dataclass, field
+
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+
+from .element import (local_stiffness, local_axes, transformation_matrix,
+                      rigid_zone_matrix, udl_equivalent_loads)
+from .materials import Concrete, RectSection
+from .results import Result
+
+DOF_NAMES = ("ux", "uy", "uz", "rx", "ry", "rz")
+
+
+@dataclass
+class Node:
+    id: int
+    x: float
+    y: float
+    z: float
+    fix: list = field(default_factory=lambda: [0] * 6)  # 1 = 拘束
+
+    @property
+    def xyz(self):
+        return np.array([self.x, self.y, self.z])
+
+
+@dataclass
+class Element:
+    id: int
+    ni: int
+    nj: int
+    mat: Concrete
+    sec: RectSection
+    kind: str = "beam"          # "beam" / "column"
+    beta: float = 0.0           # コードアングル [deg]
+    rigid_i: float = 0.0        # i 端剛域長 [mm]
+    rigid_j: float = 0.0        # j 端剛域長 [mm]
+    shear_deform: bool = True
+
+    # ---- 解析時に計算されるキャッシュ ----
+    def prepare(self, xi, xj):
+        self.R, self.L = local_axes(xi, xj, self.beta)
+        self.Lf = self.L - self.rigid_i - self.rigid_j
+        if self.Lf <= 0:
+            raise ValueError(f"要素 {self.id}: 剛域長が部材長以上です")
+        s, m = self.sec, self.mat
+        self.k_flex = local_stiffness(
+            m.E, m.G, s.A, s.Iy, s.Iz, s.J, self.Lf,
+            s.Asy if self.shear_deform else None,
+            s.Asz if self.shear_deform else None)
+        self.T = transformation_matrix(self.R)
+        self.H = rigid_zone_matrix(self.rigid_i, self.rigid_j)
+        k_node = self.H.T @ self.k_flex @ self.H
+        self.k_global = self.T.T @ k_node @ self.T
+
+
+class Model:
+    def __init__(self, name="model"):
+        self.name = name
+        self.nodes: dict[int, Node] = {}
+        self.elements: dict[int, Element] = {}
+        self.nodal_loads = defaultdict(list)    # case -> [(node, F6)]
+        self.member_loads = defaultdict(list)   # case -> [(elem, w_global)]
+        self.diaphragms = []                    # [(master, [slaves])]
+
+    # ------------------------------------------------------------ 入力
+    def add_node(self, nid, x, y, z, fix=None):
+        self.nodes[nid] = Node(nid, x, y, z, list(fix) if fix else [0] * 6)
+        return self.nodes[nid]
+
+    def fix(self, nid, dofs=(1, 1, 1, 1, 1, 1)):
+        self.nodes[nid].fix = list(dofs)
+
+    def add_element(self, eid, ni, nj, mat, sec, kind="beam", **kw):
+        self.elements[eid] = Element(eid, ni, nj, mat, sec, kind, **kw)
+        return self.elements[eid]
+
+    def add_nodal_load(self, case, nid, F):
+        """節点荷重 F = (Fx, Fy, Fz, Mx, My, Mz) [N, N·mm] 全体座標"""
+        self.nodal_loads[case].append((nid, np.asarray(F, float)))
+
+    def add_member_load(self, case, eid, w_global):
+        """部材等分布荷重 w = (wx, wy, wz) [N/mm] 全体座標・部材長あたり"""
+        self.member_loads[case].append((eid, np.asarray(w_global, float)))
+
+    def add_diaphragm(self, master, slaves):
+        """剛床仮定: slaves の (ux, uy, rz) を master に従属させる
+        master の (uz, rx, ry) は自動的に拘束される"""
+        self.diaphragms.append((master, list(slaves)))
+
+    # ------------------------------------------------------------ 剛域自動設定
+    def auto_rigid_zones(self):
+        """RC規準の慣用的な剛域設定
+            梁端: 柱フェイス位置 − 梁せい/4
+            柱端: 梁フェイス位置 − 柱せい/4
+        （3次元では柱は各方向の梁ごとに求めた値の最小値を採用する簡略化）
+        """
+        conn = defaultdict(list)
+        for e in self.elements.values():
+            conn[e.ni].append(e)
+            conn[e.nj].append(e)
+
+        def axes(e):
+            R, _ = local_axes(self.nodes[e.ni].xyz, self.nodes[e.nj].xyz, e.beta)
+            return R
+
+        for e in self.elements.values():
+            R = axes(e)
+            for end, nid in (("i", e.ni), ("j", e.nj)):
+                others = [o for o in conn[nid] if o is not e and o.kind != e.kind]
+                vals = []
+                for o in others:
+                    Ro = axes(o)
+                    if e.kind == "beam":
+                        # 柱の、梁軸方向の幅の半分
+                        d = R[0]
+                        half = 0.5 * (abs(d @ Ro[1]) * o.sec.b + abs(d @ Ro[2]) * o.sec.D)
+                        vals.append(half - e.sec.D / 4)
+                    else:
+                        # 梁せいの半分 − 柱の梁軸方向の幅/4
+                        d = Ro[0]
+                        col_w = abs(d @ R[1]) * e.sec.b + abs(d @ R[2]) * e.sec.D
+                        vals.append(o.sec.D / 2 - col_w / 4)
+                if vals:
+                    a = max(0.0, max(vals) if e.kind == "beam" else min(vals))
+                    setattr(e, f"rigid_{end}", a)
+
+    # ------------------------------------------------------------ 解析
+    def _index(self):
+        ids = sorted(self.nodes)
+        return {nid: k for k, nid in enumerate(ids)}, 6 * len(ids)
+
+    def assemble_K(self):
+        idx, n = self._index()
+        rows, cols, vals = [], [], []
+        for e in self.elements.values():
+            e.prepare(self.nodes[e.ni].xyz, self.nodes[e.nj].xyz)
+            d = np.r_[6 * idx[e.ni] + np.arange(6), 6 * idx[e.nj] + np.arange(6)]
+            r, c = np.meshgrid(d, d, indexing="ij")
+            rows.append(r.ravel()); cols.append(c.ravel()); vals.append(e.k_global.ravel())
+        K = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+                          shape=(n, n)).tocsr()
+        return K, idx, n
+
+    def _element_loads(self, case):
+        """要素ごとの等価節点荷重（局所）を返す: eid -> (p_flex, p_rigid)"""
+        out = {}
+        for eid, w in self.member_loads.get(case, []):
+            e = self.elements[eid]
+            wl = e.R @ w
+            pf, pr = udl_equivalent_loads(wl, e.Lf, e.rigid_i, e.rigid_j)
+            if eid in out:
+                out[eid] = (out[eid][0] + pf, out[eid][1] + pr)
+            else:
+                out[eid] = (pf, pr)
+        return out
+
+    def _constraint_matrix(self, idx, n):
+        """拘束・剛床条件を表す変換 u_full = C @ u_free"""
+        fixed = np.zeros(n, bool)
+        for nid, nd in self.nodes.items():
+            for k in range(6):
+                if nd.fix[k]:
+                    fixed[6 * idx[nid] + k] = True
+        dep = {}  # 従属自由度 -> [(独立自由度, 係数)]
+        for m, slaves in self.diaphragms:
+            mm = self.nodes[m]
+            for k in (2, 3, 4):
+                fixed[6 * idx[m] + k] = True
+            mux, muy, mrz = (6 * idx[m] + k for k in (0, 1, 5))
+            for s in slaves:
+                ns = self.nodes[s]
+                dx, dy = ns.x - mm.x, ns.y - mm.y
+                b = 6 * idx[s]
+                dep[b + 0] = [(mux, 1.0), (mrz, -dy)]
+                dep[b + 1] = [(muy, 1.0), (mrz, dx)]
+                dep[b + 5] = [(mrz, 1.0)]
+        free = [i for i in range(n) if not fixed[i] and i not in dep]
+        col = {g: c for c, g in enumerate(free)}
+        C = sp.lil_matrix((n, len(free)))
+        for g in free:
+            C[g, col[g]] = 1.0
+        for g, terms in dep.items():
+            for gi, coef in terms:
+                if gi in col:
+                    C[g, col[gi]] += coef
+        return C.tocsr(), fixed
+
+    def analyze(self, case) -> Result:
+        K, idx, n = self.assemble_K()
+        F = np.zeros(n)
+        for nid, f in self.nodal_loads.get(case, []):
+            F[6 * idx[nid]:6 * idx[nid] + 6] += f
+        eloads = self._element_loads(case)
+        for eid, (pf, pr) in eloads.items():
+            e = self.elements[eid]
+            pg = e.T.T @ (e.H.T @ pf + pr)
+            F[6 * idx[e.ni]:6 * idx[e.ni] + 6] += pg[:6]
+            F[6 * idx[e.nj]:6 * idx[e.nj] + 6] += pg[6:]
+
+        C, fixed = self._constraint_matrix(idx, n)
+        Kr = (C.T @ K @ C).tocsc()
+        Fr = C.T @ F
+        ur = spla.spsolve(Kr, Fr)
+        if not np.all(np.isfinite(ur)):
+            raise RuntimeError("剛性マトリクスが特異です（拘束不足・不安定構造の可能性）")
+        u = C @ ur
+
+        # 反力（支点のみ）
+        R_all = K @ u - F
+        reactions = {nid: np.where(np.array(self.nodes[nid].fix, bool),
+                                   R_all[6 * k:6 * k + 6], 0.0)
+                     for nid, k in idx.items() if any(self.nodes[nid].fix)}
+
+        disp = {nid: u[6 * k:6 * k + 6] for nid, k in idx.items()}
+
+        # 部材端力（局所座標, 部材に作用する力）
+        forces = {}
+        for eid, e in self.elements.items():
+            dg = np.r_[disp[e.ni], disp[e.nj]]
+            d_flex = e.H @ (e.T @ dg)
+            pf, pr = eloads.get(eid, (np.zeros(12), np.zeros(12)))
+            f_face = e.k_flex @ d_flex - pf
+            f_node = e.H.T @ f_face - pr
+            forces[eid] = {"face": f_face, "node": f_node}
+
+        return Result(self, case, disp, forces, reactions)

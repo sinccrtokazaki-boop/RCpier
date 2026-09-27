@@ -1,0 +1,42 @@
+# 計算例: RC造 2階建て 2スパン×1スパン 立体ラーメン（two_story_frame.py と同じ建物）
+# 単位: mm, N（30 N/mm = 30 kN/m）
+name: 2F-RC
+
+materials:
+  Fc24: {Fc: 24}
+
+sections:                     # b: 局所y方向の幅, D: せい
+  C1: {b: 600, D: 600}
+  G1: {b: 400, D: 700, phi_y: 1.5}   # 外端梁（片側スラブ）
+  G2: {b: 400, D: 700, phi_y: 2.0}   # 中間梁（両側スラブ）
+
+defaults:
+  material: Fc24
+
+grids:                        # 通り芯名: 位置
+  x: {X1: 0, X2: 6000, X3: 12000}
+  y: {Y1: 0, Y2: 7000}
+
+floors:                       # 下から 階名: 床レベル（最下階は固定支点）
+  1F: 0
+  2F: 4000
+  RF: 7500
+
+# 上から順に適用し、後のルールが優先（floor 省略 = 全階）
+# 柱 floor: 1F = 1FL〜2FL 間、梁 floor: 2F = 2FL 上
+columns:
+  - {at: "*", section: C1}
+beams:
+  - {at: "*", section: G1}
+  - {at: "X2/Y1-Y2", section: G2}
+
+openings: []                  # 吹抜け 例: {floor: 2F, area: "X1-X2/Y1-Y2"}
+
+loads:
+  G:                          # 長期荷重（梁に等分布、全体座標 [wx, wy, wz]）
+    beams:
+      - {at: "*", w: [0, 0, -30]}
+  Ex:                         # X方向地震力（床の図心に [Fx, Fy, Mz]）
+    floors:
+      2F: [300e3, 0, 0]
+      RF: [450e3, 0, 0]
