@@ -183,6 +183,26 @@ def test_whole_floor_opening_no_diaphragm():
         b.drift_levels()
 
 
+def test_drift_with_nonzero_base():
+    """基礎が z≠0 でも階高は床レベルの差: 全体を -500 ずらしても層間変形角は同じ"""
+    def drifts(z0):
+        d = _data()
+        d["floors"] = {"1F": z0, "2F": z0 + 4000, "RF": z0 + 7500}
+        d["loads"] = {"E": {"floors": {"2F": [100e3, 0, 0], "RF": [200e3, 0, 0]}}}
+        b = Building(d)
+        return b, b.model.analyze("E")
+
+    b0, r0 = drifts(0)
+    b1, r1 = drifts(-500)
+    d0 = r0.story_drifts(b0.drift_levels(), 0)
+    d1 = r1.story_drifts(b1.drift_levels(), 0)
+    assert [h for _, _, h, _ in d1] == pytest.approx([4000, 3500])
+    for a, b in zip(d0, d1):
+        assert b[1:] == pytest.approx(a[1:], rel=1e-9)
+    # base_z を明示した場合はその値を基準にする
+    assert r1.story_drifts(b1.drift_levels(), 0, base_z=0)[0][2] == pytest.approx(3500)
+
+
 def test_beam_load_selection():
     """梁荷重は指定した階・位置の梁にだけ載り、反力合計 = w × 梁長の合計"""
     d = _data()

@@ -32,20 +32,23 @@ class Result:
         return Result(r0.model, name, disp, forces, reac)
 
     # -------------------------------------------------- 層間変形角
-    def story_drifts(self, masters_by_level, direction=0):
+    def story_drifts(self, masters_by_level, direction=0, base_z=None):
         """masters_by_level: 下階から順に [(階名, 床マスター節点 or None=基礎)]
         direction: 0=X, 1=Y
+        base_z: 基礎（変位 0 とみなす面）の高さ [mm]
+            省略時は支点（拘束のある節点）の最小 z、支点がなければ 0
         戻り値: [(階名, 層間変位[mm], 階高[mm], 層間変形角)]
         """
+        if base_z is None:
+            zs = [nd.z for nd in self.model.nodes.values() if any(nd.fix)]
+            base_z = min(zs) if zs else 0.0
         out = []
-        prev_u, prev_z = 0.0, None
+        prev_u, prev_z = 0.0, base_z
         for name, nid in masters_by_level:
             if nid is None:
                 continue
             nd = self.model.nodes[nid]
             u = self.disp[nid][direction]
-            if prev_z is None:
-                prev_z = 0.0
             h = nd.z - prev_z
             du = u - prev_u
             out.append((name, du, h, du / h if h else np.nan))
