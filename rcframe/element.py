@@ -137,12 +137,50 @@ def _profile_samples(profile, a, b):
     return np.concatenate(pts), np.concatenate(wts)
 
 
-def _fixed_end_transverse(s, q, Lf, EI, GA):
+def basic_flexibility(L, EI, GA=None):
+    """単純支持梁の材端モーメント（両端とも θ 基準の反時計回り正）に対する
+    材端回転角（弦に対する）の柔性マトリクス 2×2（Timoshenko）
+        曲げ: L/(6EI)·[[2, −1], [−1, 2]]、せん断: 1/(GA·L)·[[1, 1], [1, 1]]
+    """
+    a = L / (6 * EI)
+    c = 1.0 / (GA * L) if GA else 0.0
+    return np.array([[2 * a + c, -a + c], [-a + c, 2 * a + c]])
+
+
+# 曲げ面ごとの自由度: 面 0 = xy 面（uy, rz; Iz, Asy）、面 1 = xz 面（uz, ry; Iy, Asz）
+# xz 面は ry = −dw/dx なので θ 基準へ符号を反転する
+_PLANES = (([1, 5, 7, 11], np.array([1.0, 1.0, 1.0, 1.0])),
+           ([2, 4, 8, 10], np.array([1.0, -1.0, 1.0, -1.0])))
+
+
+def local_stiffness_springs(E, G, A, Iy, Iz, J, L, Asy=None, Asz=None, fs=None):
+    """材端に曲げの回転ばねを持つ部材の 12x12 局所剛性（ばねは可撓部の両端）
+
+    fs: ばねの柔性 [面][端] = 1/k [rad/(N·mm)]（2×2、0 = 剛）。面 0 = xy 面, 面 1 = xz 面
+    単純支持の基本系で 部材の柔性 + ばねの柔性 を逆行列にして基本剛性を求め、
+    材端の自由度 (v_i, θ_i, v_j, θ_j) に変換する。fs = 0 なら local_stiffness と一致。
+    """
+    k = local_stiffness(E, G, A, Iy, Iz, J, L, Asy, Asz)
+    if fs is None:
+        return k
+    fs = np.asarray(fs, float)
+    a = np.array([[1 / L, 1, -1 / L, 0], [1 / L, 0, -1 / L, 1]])   # 基本系の材端回転角
+    for plane, (EI, GA) in enumerate(((E * Iz, G * Asy if Asy else None),
+                                      (E * Iy, G * Asz if Asz else None))):
+        idx, sgn = _PLANES[plane]
+        Kb = np.linalg.inv(basic_flexibility(L, EI, GA) + np.diag(fs[plane]))
+        k[np.ix_(idx, idx)] = (sgn[:, None] * (a.T @ Kb @ a)) * sgn[None, :]
+    return k
+
+
+def _fixed_end_transverse(s, q, Lf, EI, GA, fs=None):
     """両端固定 Timoshenko 梁の横荷重 q(s) に対する等価節点荷重（θ = dw/ds 基準）
 
     柔性法: i端固定の片持ち梁に置き換え、j端の反力 (Rj, Mj) を適合条件から求める
         片持ち梁の j端たわみ（点荷重 P が s にあるとき）: P s²(3Lf−s)/(6EI) + P s/GA
         j端回転角: P s²/(2EI)
+    材端ばね（柔性 fs = (fs_i, fs_j)）がある場合: 固定端モーメント m_el から単純梁の
+    材端回転角 r0 = −f_el·m_el を求め、m = −(f_el + diag(fs))⁻¹·r0 とする
     戻り値: (Pi, Mi, Pj, Mj) = −(固定端反力)
     """
     cs = 1.0 / GA if GA else 0.0
@@ -151,12 +189,18 @@ def _fixed_end_transverse(s, q, Lf, EI, GA):
     F = np.array([[Lf ** 3 / (3 * EI) + Lf * cs, Lf ** 2 / (2 * EI)],
                   [Lf ** 2 / (2 * EI), Lf / EI]])
     Rj, Mj = np.linalg.solve(F, [-dq, -tq])
-    Ri = -np.sum(q) - Rj
     Mi = -Mj - Rj * Lf - np.sum(q * s)
+    if fs is not None and np.any(np.asarray(fs) != 0):
+        f_el = basic_flexibility(Lf, EI, GA)
+        r0 = -f_el @ np.array([Mi, Mj])
+        Mi, Mj = -np.linalg.solve(f_el + np.diag(fs), r0)
+        Rj = -(Mi + Mj + np.sum(q * s)) / Lf
+    Ri = -np.sum(q) - Rj
     return -Ri, -Mi, -Rj, -Mj
 
 
-def distributed_equivalent_loads(w_local, profile, L, ai, aj, EIy, EIz, GAy=None, GAz=None):
+def distributed_equivalent_loads(w_local, profile, L, ai, aj, EIy, EIz, GAy=None, GAz=None,
+                                 fs=None):
     """区分線形分布荷重（台形・三角形など）に対する等価節点荷重
 
     荷重 = w_local × f(x)  [N/mm]
@@ -167,21 +211,23 @@ def distributed_equivalent_loads(w_local, profile, L, ai, aj, EIy, EIz, GAy=None
       GAy, GAz: せん断剛性 G*As（None でせん断変形無視）。GAy は uy 方向の変形用
     せん断変形を考慮した固定端力を柔性法で厳密に求める（非対称荷重では
     せん断変形が固定端モーメントに影響するため）。
+    fs: 材端ばねの柔性 [面][端]（local_stiffness_springs と同じ。None = ばねなし）
     戻り値は udl_equivalent_loads と同じ (p_flex, p_rigid)。
     """
     wx, wy, wz = w_local
     Lf = L - ai - aj
     p = np.zeros(12)
     r = np.zeros(12)
+    fs = (None, None) if fs is None else np.asarray(fs, float)
 
     # 可撓部（s = x − ai）
     x, q = _profile_samples(profile, ai, L - aj)
     if len(x):
         s = x - ai
         p[0], p[6] = wx * np.sum(q * (1 - s / Lf)), wx * np.sum(q * s / Lf)
-        Pi, Mi, Pj, Mj = _fixed_end_transverse(s, q, Lf, EIz, GAy)   # xy 面: θ = rz
+        Pi, Mi, Pj, Mj = _fixed_end_transverse(s, q, Lf, EIz, GAy, fs[0])   # xy 面: θ = rz
         p[1], p[5], p[7], p[11] = wy * Pi, wy * Mi, wy * Pj, wy * Mj
-        Pi, Mi, Pj, Mj = _fixed_end_transverse(s, q, Lf, EIy, GAz)   # xz 面: ry = −dw/dx
+        Pi, Mi, Pj, Mj = _fixed_end_transverse(s, q, Lf, EIy, GAz, fs[1])   # xz 面: ry = −dw/dx
         p[2], p[4], p[8], p[10] = wz * Pi, -wz * Mi, wz * Pj, -wz * Mj
 
     # 剛域上の荷重は節点へ直接伝達（モーメントは節点まわり）

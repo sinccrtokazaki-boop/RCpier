@@ -4,12 +4,13 @@
 """
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from .element import (local_stiffness, local_axes, transformation_matrix,
+from .element import (local_stiffness, local_stiffness_springs, local_axes, transformation_matrix,
                       rigid_zone_matrix, udl_equivalent_loads, distributed_equivalent_loads)
 from .materials import Concrete, RectSection
 from .results import Result
@@ -42,6 +43,9 @@ class Element:
     rigid_i: float = 0.0        # i 端剛域長 [mm]
     rigid_j: float = 0.0        # j 端剛域長 [mm]
     shear_deform: bool = True
+    # 材端の曲げばねの柔性 [面][端]（面 0 = xy 面, 面 1 = xz 面、0 = 剛）。None = ばねなし
+    # 非線形解析（pushover.py）が各ステップの接線柔性を設定する
+    springs: Optional[np.ndarray] = None
 
     # ---- 解析時に計算されるキャッシュ ----
     def prepare(self, xi, xj):
@@ -50,10 +54,13 @@ class Element:
         if self.Lf <= 0:
             raise ValueError(f"要素 {self.id}: 剛域長が部材長以上です")
         s, m = self.sec, self.mat
-        self.k_flex = local_stiffness(
-            m.E, m.G, s.A, s.Iy, s.Iz, s.J, self.Lf,
-            s.Asy if self.shear_deform else None,
-            s.Asz if self.shear_deform else None)
+        args = (m.E, m.G, s.A, s.Iy, s.Iz, s.J, self.Lf,
+                s.Asy if self.shear_deform else None,
+                s.Asz if self.shear_deform else None)
+        if self.springs is None:
+            self.k_flex = local_stiffness(*args)
+        else:
+            self.k_flex = local_stiffness_springs(*args, fs=self.springs)
         self.T = transformation_matrix(self.R)
         self.H = rigid_zone_matrix(self.rigid_i, self.rigid_j)
         k_node = self.H.T @ self.k_flex @ self.H
@@ -163,16 +170,18 @@ class Model:
         for eid, w, profile in self.member_loads.get(case, []):
             e = self.elements[eid]
             wl = e.R @ w
-            if profile is None:
+            if profile is None and e.springs is None:
                 pf, pr = udl_equivalent_loads(wl, e.Lf, e.rigid_i, e.rigid_j)
             else:
+                if profile is None:
+                    profile = [(0.0, 1.0), (e.L, 1.0)]
                 if profile[0][0] < -1e-6 or profile[-1][0] > e.L + 1e-6:
                     raise ValueError(f"要素 {eid}: profile の範囲が部材長 {e.L:.1f} mm を超えています")
                 s, m = e.sec, e.mat
                 pf, pr = distributed_equivalent_loads(
                     wl, profile, e.L, e.rigid_i, e.rigid_j, m.E * s.Iy, m.E * s.Iz,
                     m.G * s.Asy if e.shear_deform else None,
-                    m.G * s.Asz if e.shear_deform else None)
+                    m.G * s.Asz if e.shear_deform else None, fs=e.springs)
             if eid in out:
                 out[eid] = (out[eid][0] + pf, out[eid][1] + pr)
             else:

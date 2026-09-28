@@ -75,7 +75,7 @@ class Building:
     TOP_KEYS = ("name", "materials", "sections", "defaults", "grids", "floors",
                 "columns", "beams", "openings", "loads",
                 "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic",
-                "steels", "design")
+                "steels", "design", "nonlinear")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -84,6 +84,7 @@ class Building:
         self._read_steels(data.get("steels") or {})
         self._read_sections(data.get("sections") or {})
         self._read_design(data.get("design") or {})
+        self._read_nonlinear(data.get("nonlinear") or {})
         d = data.get("defaults") or {}
         _check_keys(d, ("material",), "defaults")
         self.default_material = d.get("material")
@@ -190,6 +191,28 @@ class Building:
             "young_ratio": _num(d.get("young_ratio", 15), "design.young_ratio"),
             "long": [str(c) for c in _as_list(d["long"])] if d.get("long") else None,
             "seismic": [str(c) for c in _as_list(d["seismic"])] if d.get("seismic") else None,
+        }
+
+    def _read_nonlinear(self, d):
+        _check_keys(d, ("sigma_y_factor", "post_yield_ratio", "pushover"), "nonlinear")
+        p = d.get("pushover") or {}
+        _check_keys(p, ("directions", "max_drift", "step_drift"), "nonlinear.pushover")
+        r = _num(d.get("post_yield_ratio", 0.001), "nonlinear.post_yield_ratio")
+        if not 0 < r < 1:
+            raise InputError("nonlinear.post_yield_ratio: 0 < r < 1 としてください")
+        dirs = [str(x) for x in _as_list(p.get("directions", ["+x", "-x", "+y", "-y"]))]
+        for x in dirs:
+            if x.lstrip("+-").lower() not in ("x", "y"):
+                raise InputError(f"nonlinear.pushover.directions: +x, -x, +y, -y から指定してください: {x!r}")
+        self.nonlinear = {
+            "given": bool(d),        # YAML に nonlinear の指定があるか（計算例の実行判定用）
+            "sigma_y_factor": _num(d.get("sigma_y_factor", 1.1), "nonlinear.sigma_y_factor"),
+            "post_yield_ratio": r,
+            "pushover": {
+                "directions": dirs,
+                "max_drift": _num(p.get("max_drift", 0.02), "nonlinear.pushover.max_drift"),
+                "step_drift": _num(p.get("step_drift", 0.0002), "nonlinear.pushover.step_drift"),
+            },
         }
 
     def _read_grids(self, grids):

@@ -1,7 +1,7 @@
 # rcframe — RC造 3次元フレーム解析システム
 
 実務の設計補助を目的とした、Python 製の RC 造立体骨組解析プログラムです。
-現在はフェーズ4（断面算定: RC規準の許容応力度検定）まで実装しています。
+現在はフェーズ5（非線形解析: 材端ばねモデルによるプッシュオーバー）まで実装しています。
 
 ## 動作環境
 Python 3.10 以上、numpy、scipy、PyYAML（テストには pytest）
@@ -12,7 +12,7 @@ python -m pytest tests          # 理論解との照合テスト
 python examples/two_story_frame.py
 python examples/from_yaml.py examples/two_story_frame.yaml
 python examples/from_yaml.py examples/two_story_auto_loads.yaml   # 荷重の自動生成
-python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定
+python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定・プッシュオーバー
 ```
 
 ## 実装済みの機能
@@ -31,6 +31,8 @@ python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定
   Ai 分布による地震力（重心に作用）、偶発偏心
 - 部材の任意位置の断面力（`Result.section_forces_at`）
 - 断面算定（RC規準 2018）: 長期・短期の荷重組合せ、梁の曲げ・せん断、柱の軸力と曲げ・せん断、構造規定の警告
+- 静的非線形解析（プッシュオーバー）: 材端ばねモデル（トリリニア骨格・最大点指向型）、
+  事象追跡型の荷重増分法、長期荷重 → Ai 分布の水平力、ひび割れ・降伏の発生順序
 
 ## 入力ファイル（YAML）
 例: [examples/two_story_frame.yaml](examples/two_story_frame.yaml)
@@ -168,6 +170,39 @@ sections:
   引張鉄筋・圧縮鉄筋のいずれかが許容応力度に達するときの値
 - 構造規定の警告: 梁・柱の pw ≧ 0.2%、柱の pg ≧ 0.8%
 
+### 静的非線形解析（プッシュオーバー）
+例: [examples/two_story_design.yaml](examples/two_story_design.yaml)（`nonlinear` の項）
+
+```python
+from rcframe import load_building, run_pushover
+bld = load_building("examples/two_story_design.yaml")
+po = run_pushover(bld, "+x")     # "+x", "-x", "+y", "-y"
+po.print_curve()                 # 荷重係数・ベースシア・各層の層間変形角・事象
+po.print_hinges()                # ひび割れ・降伏した材端ばねと発生ステップ（all_springs=True で全て）
+po.steps, po.events, po.final    # final: 最終状態の Result（section_forces 等が使える）
+```
+
+```yaml
+nonlinear:
+  sigma_y_factor: 1.1         # 鉄筋の材料強度 σy = 1.1F
+  post_yield_ratio: 0.001     # 降伏後の剛性比（部材の初期剛性に対する）
+  pushover:
+    directions: [+x, -x, +y, -y]
+    max_drift: 0.02           # いずれかの層の層間変形角がこの値に達したら終了
+    step_drift: 0.0002        # 1ステップの層間変形角増分の上限（曲線の細かさ）
+```
+
+- **部材モデル**: 弾性部材（Timoshenko）の可撓部両端に曲げの回転ばね。梁は鉛直面内の曲げのみ、
+  柱は X・Y 方向それぞれ独立。軸・せん断・ねじりは弾性。配筋のない部材は弾性
+- **骨格曲線**（2020年版 建築物の構造関係技術基準解説書 付録1-3 の略算式）:
+  Mc = 0.56√Fc·Ze（柱は + N·D/6）、梁 My = 0.9·at·σy·d、柱 My は軸力による 3区分の式、
+  降伏点剛性低下率 αy は菅野式（せん断スパン = 内法長さ/2、pt = at/(b·d)）。
+  部材の逆対称曲げの M–θ（初期剛性 K0、降伏点 My/(αy·K0)、降伏後 r·K0）が
+  トリリニアとなるようにばねの骨格を定める。柱の軸力は長期荷重時の値で固定
+- **履歴則**: 最大点指向型。除荷時はばね剛、M が 0 を越えたら反対側の最大点（未経験ならひび割れ点）へ向かう
+- **解析法**: 事象追跡型の荷重増分法。各ステップは次のばねの折れ点まで（ばねが折れ線なので厳密で、
+  不釣合い力や収束計算がない）。長期荷重 G+P を載荷後、Ai 分布の水平力（重心のずれの Mz を含む）を比例増加
+
 部材荷重を Python から与える場合は `Model.add_member_load(case, eid, w, profile=[(x, 係数), ...])`
 で区分線形の分布を指定できます（x は i節点からの距離 [mm]）。
 
@@ -187,7 +222,7 @@ sections:
 | 2 | 入力の効率化（通り芯・階からのモデル自動生成、入力ファイル形式） | 済 |
 | 3 | 荷重の自動生成（床荷重の梁への分配、Ai分布による地震力、偏心） | 済 |
 | 4 | 断面算定（RC規準: 曲げ・せん断の許容応力度検定） | 済 |
-| 5 | 非線形解析（材端剛塑性ばね、トリリニア骨格曲線、荷重増分法） | 予定 |
+| 5 | 非線形解析（材端剛塑性ばね、トリリニア骨格曲線、荷重増分法） | 済 |
 | 6 | 保有水平耐力（Ds・Fes、崩壊形の判定） | 予定 |
 | 7 | 3D可視化・計算書出力 | 予定 |
 
@@ -202,3 +237,5 @@ sections:
 - 断面算定: 柱の 2軸曲げの同時考慮、付着、柱梁接合部、曲げ降伏時せん断力による設計は未対応。
   梁の軸力・弱軸曲げは無視。柱の曲げは各方向の 1面の主筋のみ考慮（中段筋は無視）。
   梁の中央はスパン中央の値で検定（スパン内の最大正曲げ位置ではない）。梁の左右端部は同一配筋
+- 非線形解析: 曲げばねのみ（せん断破壊・せん断ばねは未考慮）、柱の変動軸力による My の変化と
+  2方向曲げの相互作用は未考慮、P-Δ 効果なし、梁の My はスラブ筋の寄与を無視、Ze は鉄筋を無視

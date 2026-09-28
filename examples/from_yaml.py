@@ -6,7 +6,7 @@
 """
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from rcframe import Result, load_building, run_checks
+from rcframe import Result, load_building, run_checks, run_pushover
 
 path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("two_story_frame.yaml")
 bld = load_building(path)
@@ -45,3 +45,10 @@ if "Ex" in res and long_term:
 # 配筋のある断面があれば断面検定（RC規準）
 if any(s.rebar for s in bld.sections.values()):
     run_checks(bld, res).print_summary()
+
+# nonlinear の指定があればプッシュオーバー
+if bld.nonlinear["given"]:
+    for d in bld.nonlinear["pushover"]["directions"]:
+        po = run_pushover(bld, d, res)
+        po.print_curve(every=20)
+        po.print_hinges()
