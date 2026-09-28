@@ -51,6 +51,7 @@ class PushoverResult:
     final: Result = None                          # 最終状態の変位・部材端力
     gravity_disp: dict = None                     # 長期荷重載荷後の節点変位
     warnings: list = field(default_factory=list)
+    unconverged: list = field(default_factory=list)   # ばねの載荷・除荷の判定が整合しなかったステップ
 
     @property
     def lateral(self):
@@ -166,8 +167,8 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
         while True:
             if step >= max_steps:
                 raise RuntimeError(f"ステップ数が上限 {max_steps} に達しました")
-            # ---- ばねの向きの仮定と解の整合（最大 20 回）
-            for _ in range(20):
+            # ---- ばねの向きの仮定と解の整合（最大 20 回。整合しなければ警告を残して進む）
+            for it in range(20):
                 tang = {key: hinges[key].tangent(sigma[key]) for key in hinges}
                 du, dface, dnode = solve(phase, tang)
                 dm = {key: spring_moment(dface[key[0]], key[1], key[2]) for key in hinges}
@@ -181,6 +182,8 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                             changed = True
                 if not changed:
                     break
+            else:
+                res.unconverged.append(step + 1)
             # ---- 次の事象までの荷重係数増分
             dl = math.inf
             cand = {}
@@ -349,4 +352,7 @@ def run_pushover(bld, direction="+x", results=None):
     po.total_P = abs(po.total_P)
     po.total_W = sum(w for w, _, _ in bld.weights.values()) if bld.weights else 0.0
     po.warnings = warns
+    if po.unconverged:
+        po.warnings.append(f"ばねの載荷・除荷の判定が整合しなかったステップがあります: {po.unconverged[:10]}"
+                           f"{' ほか' if len(po.unconverged) > 10 else ''}（結果の精度に注意）")
     return po

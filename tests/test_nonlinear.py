@@ -202,6 +202,7 @@ def test_pushover_symmetry_and_drift(pushed):
     assert qp == pytest.approx(qm, rel=1e-6)
     assert max(abs(x) for x in po["+x"].steps[-1]["drifts"]) == pytest.approx(0.02, rel=1e-9)
     assert po["+x"].steps[-1]["drifts"][0] == pytest.approx(-po["-x"].steps[-1]["drifts"][0], rel=1e-6)
+    assert po["+x"].unconverged == [] and po["-x"].unconverged == []
 
 
 def test_pushover_story_shear_equilibrium(pushed):
