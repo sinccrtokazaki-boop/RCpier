@@ -79,3 +79,36 @@ class Hinge:
         if any(self.cracked.values()):
             return "ひび割れ"
         return "弾性"
+
+
+class EPSpring:
+    """節点の並進ばね（地盤ばね）の弾完全塑性モデル（上限 cap、降伏後は r·k の微小剛性）
+
+    力 F = ばねの抵抗力（変位と同じ符号を正）。除荷は弾性剛性 k。
+    tangent / advance は Hinge と同じ使い方（事象追跡型の増分解析用）
+    """
+
+    def __init__(self, k, cap, r=1e-4):
+        self.k, self.cap, self.r = k, cap, r
+        self.F = 0.0
+        self.yielded = False
+        self.tol = 1e-9 * cap
+
+    def tangent(self, sigma):
+        """F を sigma 方向に変化させるときの (接線剛性, 次の事象の F, 分岐名)"""
+        if sigma * self.F >= self.cap - self.tol:
+            return self.r * self.k, sigma * math.inf, "plastic"
+        return self.k, sigma * self.cap, "elastic"
+
+    def advance(self, dF, hit=False, limit=None):
+        self.F += dF
+        if hit:
+            self.F = limit
+        if not self.yielded and abs(self.F) >= self.cap - self.tol:
+            self.yielded = True
+            return ["地盤降伏"]
+        return []
+
+    @property
+    def state(self):
+        return "降伏" if self.yielded else "弾性"

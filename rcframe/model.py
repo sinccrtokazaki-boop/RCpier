@@ -49,6 +49,12 @@ class Element:
 
     # ---- 解析時に計算されるキャッシュ ----
     def prepare(self, xi, xj):
+        # 形状・剛域・断面・ばねが前回と同じなら再計算しない（非線形解析の各ステップの高速化）
+        key = (tuple(xi), tuple(xj), self.beta, self.rigid_i, self.rigid_j, id(self.sec), id(self.mat),
+               self.shear_deform, None if self.springs is None else np.asarray(self.springs).tobytes())
+        if getattr(self, "_prep_key", None) == key:
+            return
+        self._prep_key = key
         self.R, self.L = local_axes(xi, xj, self.beta)
         self.Lf = self.L - self.rigid_i - self.rigid_j
         if self.Lf <= 0:
@@ -75,8 +81,14 @@ class Model:
         self.nodal_loads = defaultdict(list)    # case -> [(node, F6)]
         self.member_loads = defaultdict(list)   # case -> [(elem, w_global, profile)]
         self.diaphragms = []                    # [(master, [slaves])]
+        self.node_springs = {}                  # nid -> 6 成分の対角ばね剛性（全体座標、地盤ばね等）
 
     # ------------------------------------------------------------ 入力
+    def add_node_spring(self, nid, k):
+        """節点ばね k = (kx, ky, kz, krx, kry, krz) [N/mm, N·mm/rad]（全体座標、支点としての拘束なし）
+        同じ節点に複数回与えると加算する"""
+        k = np.asarray(k, float)
+        self.node_springs[nid] = self.node_springs.get(nid, np.zeros(6)) + k
     def add_node(self, nid, x, y, z, fix=None):
         self.nodes[nid] = Node(nid, x, y, z, list(fix) if fix else [0] * 6)
         return self.nodes[nid]
@@ -160,6 +172,9 @@ class Model:
             d = np.r_[6 * idx[e.ni] + np.arange(6), 6 * idx[e.nj] + np.arange(6)]
             r, c = np.meshgrid(d, d, indexing="ij")
             rows.append(r.ravel()); cols.append(c.ravel()); vals.append(e.k_global.ravel())
+        for nid, k in self.node_springs.items():
+            d = 6 * idx[nid] + np.arange(6)
+            rows.append(d); cols.append(d); vals.append(np.asarray(k, float))
         K = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
                           shape=(n, n)).tocsr()
         return K, idx, n
@@ -257,4 +272,7 @@ class Model:
             f_node = e.H.T @ f_face - pr
             forces[eid] = {"face": f_face, "node": f_node}
 
-        return Result(self, case, disp, forces, reactions)
+        res = Result(self, case, disp, forces, reactions)
+        # 節点ばねの反力（ばねが節点に及ぼす力 = −k·u）
+        res.spring_forces = {nid: -np.asarray(k) * disp[nid] for nid, k in self.node_springs.items()}
+        return res

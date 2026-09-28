@@ -12,6 +12,7 @@ class Result:
         self.forces = forces        # eid -> {"face": 12, "node": 12}（部材に作用する局所端力）
         self.reactions = reactions  # nid -> 6
         self.factors = factors or {case: 1.0}   # 荷重ケース -> 係数（組合せ結果の部材荷重の復元用）
+        self.spring_forces = {}                 # nid -> 節点ばねが節点に及ぼす力（Model.analyze が設定）
 
     # -------------------------------------------------- 断面力（設計用符号）
     def section_forces(self, eid, at="face"):
@@ -70,7 +71,9 @@ class Result:
         for r, c in items:
             for case, k in r.factors.items():
                 fac[case] = fac.get(case, 0.0) + c * k
-        return Result(r0.model, name, disp, forces, reac, fac)
+        out = Result(r0.model, name, disp, forces, reac, fac)
+        out.spring_forces = {n: sum(c * r.spring_forces[n] for r, c in items) for n in r0.spring_forces}
+        return out
 
     # -------------------------------------------------- 層間変形角
     def story_drifts(self, masters_by_level, direction=0, base_z=None):

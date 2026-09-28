@@ -4,12 +4,13 @@
 """
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from rcframe import load_model, run_pier_checks
+from rcframe import load_model, run_level2, run_pier_checks
 
 path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("pier_example.yaml")
 pier = load_model(path)
 m = pier.model
-print(f"モデル {m.name}: 節点 {len(m.nodes)}, 要素 {len(m.elements)}, 杭 {len(pier.piles)}")
+print(f"モデル {m.name}: 節点 {len(m.nodes)}, 要素 {len(m.elements)}, 杭 {len(pier.piles)}"
+      f"（杭のモデル: {'地盤ばね' if pier.pile_model == 'soil_spring' else '仮想固定点'}）")
 
 print("\n=== 杭の仮想固定点（Chang の方法） ===")
 print(f"{'杭':<8} {'海底面[m]':>9} {'kh[kN/m³]':>10} {'1/β[m]':>7} {'固定点[m]':>9} {'杭長[m]':>8} {'自由長[m]':>9}")
@@ -49,6 +50,10 @@ if pier.combinations and pier.checks["given"]:
     for (item,), r in sorted(rep.governing(("item",)).items()):
         print(f"{item:<10} {r.label:<14} {r.pos:<4} {r.combo:<12} {r.ratio:5.2f}  {'OK' if r.ok else 'NG'}  {r.note}")
     print(f"最大照査値 {rep.max_ratio:.2f}、NG {len(rep.ng)} 箇所（全部材は rep.print_summary()）")
+
+if pier.level2["given"]:
+    for d in pier.level2["directions"]:
+        run_level2(pier, d, res).print()
 
 for case in ("H", "W"):
     if case not in res:

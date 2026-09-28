@@ -39,7 +39,7 @@ class Pier(GridMixin):
     杭ごとの仮想固定点などは self.piles[(ix, iy)]（dict）に入る。
     """
     TOP_KEYS = ("type", "name", "materials", "sections", "grids", "deck", "beams", "piles",
-                "loads", "report", "unit_weight", "actions", "combinations", "checks")
+                "loads", "report", "unit_weight", "actions", "combinations", "checks", "level2")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -75,6 +75,7 @@ class Pier(GridMixin):
             self._apply_loads(str(case), spec)
         self._read_combinations(data.get("combinations") or {})
         self._read_checks(data.get("checks") or {})
+        self._read_level2(data.get("level2") or {})
 
     # ============================================================ 読み込み
     def _read_materials(self, mats):
@@ -178,17 +179,27 @@ class Pier(GridMixin):
                 self.beams[(d, a, b)] = val
 
     def _read_piles(self, p):
-        _check_keys(p, ("section", "rows", "overrides"), "piles")
+        _check_keys(p, ("section", "rows", "overrides", "model", "segment"), "piles")
         if p is None or "rows" not in p:
             raise InputError("piles: rows（杭の列ごとの海底面と kh）がありません")
+        self.pile_model = str(p.get("model", "fixed_point"))
+        if self.pile_model not in ("fixed_point", "soil_spring"):
+            raise InputError("piles.model: fixed_point（仮想固定点）または soil_spring（地盤ばね）です")
+        self.pile_segment = _num(p.get("segment", 0.5), "piles.segment") * M
+        if self.pile_segment <= 0:
+            raise InputError("piles.segment: 正の値です")
         rows = {}
         self.pile_capacity = {}                       # 列 -> (Rcd, Rtd) [N]
+        self.pile_soil = {}                           # 列 -> {"tip": z [mm] or None, "pu": [N/mm²] or None}
         for name, d in p["rows"].items():
             what = f"piles.rows.{name}"
             name = str(name)
             if name not in self.iy:
                 raise InputError(f"{what}: 未定義の Y通り（杭の列）です")
-            _check_keys(d, ("seabed", "kh", "Rcd", "Rtd"), what)
+            _check_keys(d, ("seabed", "kh", "Rcd", "Rtd", "tip", "pu"), what)
+            self.pile_soil[self.iy[name]] = {
+                "tip": _num(d["tip"], f"{what}.tip") * M if "tip" in d else None,
+                "pu": _num(d["pu"], f"{what}.pu") * KN_M2 if "pu" in d else None}
             if "seabed" not in d or "kh" not in d:
                 raise InputError(f"{what}: seabed と kh を指定してください")
             if "Rcd" in d or "Rtd" in d:              # 設計支持力（押込み・引抜き）[kN]（入力値）
@@ -234,22 +245,57 @@ class Pier(GridMixin):
             self.labels[("node", nid)] = f"{self.gx[i][0]}/{self.gy[j][0]}"
             nid += 1
         eid = 1
-        # 杭: i端 = 仮想固定点（固定）、j端 = 杭頭
+        # 杭: 仮想固定点モデル = 1部材（i端 = 仮想固定点で固定、j端 = 杭頭）
+        #     地盤ばねモデル   = 自由長部（海底面 → 杭頭）+ 地中部を分割（各節点に水平地盤ばね）
         for (i, j), (sec, mat) in sorted(self.pile_sec.items()):
             seabed, kh = self.pile_rows[j]
+            x, y = self.gx[i][1], self.gy[j][1]
+            tag = f"{self.gx[i][0]}/{self.gy[j][0]}"
             EI = mat.E * sec.Iy
             beta = chang_beta(kh, sec.D, EI)
             z_fix = seabed - 1.0 / beta
-            m.add_node(nid, self.gx[i][1], self.gy[j][1], z_fix, fix=[1] * 6)
-            self.labels[("node", nid)] = f"{self.gx[i][0]}/{self.gy[j][0]} 仮想固定点"
-            m.add_element(eid, nid, self.node_ids[(i, j)], mat, sec, "column",
+            info = dict(seabed=seabed, kh=kh, beta=beta, z_fix=z_fix)
+            if self.pile_model == "fixed_point":
+                m.add_node(nid, x, y, z_fix, fix=[1] * 6)
+                self.labels[("node", nid)] = f"{tag} 仮想固定点"
+                bottom = nid
+                nid += 1
+                info.update(length=self.z_model - z_fix, free_length=self.z_soffit - z_fix,
+                            fixed_node=bottom, ground=[])
+            else:
+                soil = self.pile_soil.get(j, {})
+                tip = soil.get("tip") if soil.get("tip") is not None else seabed - 5.0 / beta
+                if tip >= seabed:
+                    raise InputError(f"杭 {tag}: 杭先端（tip）が海底面より上です")
+                n_seg = max(1, math.ceil((seabed - tip) / self.pile_segment - 1e-9))
+                dz = (seabed - tip) / n_seg
+                ground = []                     # 海底面から下へ [(節点, z, ばね剛性 [N/mm], 上限 [N])]
+                for k in range(n_seg + 1):
+                    z = seabed - k * dz
+                    lt = dz / 2 if k in (0, n_seg) else dz           # 負担長
+                    kk = kh * sec.D * lt
+                    cap = soil["pu"] * sec.D * lt if soil.get("pu") else None
+                    m.add_node(nid, x, y, z, fix=[0, 0, 1, 0, 0, 1] if k == n_seg else None)
+                    m.add_node_spring(nid, [kk, kk, 0, 0, 0, 0])
+                    self.labels[("node", nid)] = f"{tag} z={z / M:.2f}"
+                    ground.append((nid, z, kk, cap))
+                    nid += 1
+                for k in range(n_seg):          # 地中部の要素（下の節点 → 上の節点）
+                    m.add_element(eid, ground[k + 1][0], ground[k][0], mat, sec, "column")
+                    self.elem_ids[("pg", i, j, k)] = eid
+                    self.labels[("elem", eid)] = f"杭 {tag} 地中{k + 1}"
+                    eid += 1
+                bottom = ground[0][0]
+                info.update(length=self.z_model - tip, free_length=self.z_soffit - seabed, tip=tip,
+                            seabed_node=bottom, tip_node=ground[-1][0], ground=ground,
+                            segments=[self.elem_ids[("pg", i, j, k)] for k in range(n_seg)])
+            m.add_element(eid, bottom, self.node_ids[(i, j)], mat, sec, "column",
                           rigid_j=self.z_model - self.z_soffit)
             self.elem_ids[("p", i, j)] = eid
-            self.labels[("elem", eid)] = f"杭 {self.gx[i][0]}/{self.gy[j][0]}"
-            self.piles[(i, j)] = dict(eid=eid, fixed_node=nid, seabed=seabed, kh=kh, beta=beta,
-                                      z_fix=z_fix, length=self.z_model - z_fix,
-                                      free_length=self.z_soffit - z_fix)
-            nid += 1
+            self.labels[("elem", eid)] = f"杭 {tag}"
+            info["eid"] = eid
+            info["elements"] = [eid] + info.get("segments", [])   # 杭頭側から下へ
+            self.piles[(i, j)] = info
             eid += 1
         for key in sorted(self.beams, key=lambda k: (k[0], k[1], k[2])):
             d, a, b = key
@@ -341,7 +387,7 @@ class Pier(GridMixin):
             q = self.gamma_rc * self.slab_t + _num(d.get("pavement", 0.0), "actions.D.pavement") * KN_M2
             self._area_load("D", q, ws)
             for key, eid in self.elem_ids.items():
-                if key[0] == "p":
+                if key[0] in ("p", "pg"):                     # 杭（自由長部・地中部）は除く
                     continue
                 e = m.elements[eid]
                 w = self.gamma_rc * e.sec.b * max(e.sec.D - self.slab_t, 0.0)
@@ -469,6 +515,51 @@ class Pier(GridMixin):
                       "eps_csd": _num(cr.get("eps_csd", 150e-6), "checks.crack.eps_csd")},
             "pile": {"gamma_m": _num(pl.get("gamma_m", 1.0), "checks.pile.gamma_m")},
             "strength_combinations": sc,
+        }
+
+    def _read_level2(self, d):
+        """レベル2地震動のプッシュオーバーの設定（要求側と判定基準は入力）"""
+        keys = ("directions", "gravity", "kh", "target_displacement", "max_displacement", "step",
+                "post_yield_ratio", "inground_depth", "criteria")
+        _check_keys(d, keys, "level2")
+        cases = set(self.cases)
+        dirs = [str(x) for x in _as_list(d.get("directions", ["+y", "-y"]))]
+        for x in dirs:
+            if x.lstrip("+-").lower() not in ("x", "y"):
+                raise InputError(f"level2.directions: +x, -x, +y, -y から指定してください: {x!r}")
+        grav = d.get("gravity", {"D": 1.0, "Ls": 1.0})
+        if not isinstance(grav, dict):
+            raise InputError("level2.gravity: {荷重ケース: 1.0} で指定してください")
+        for c, f in grav.items():
+            if d and str(c) not in cases:
+                raise InputError(f"level2.gravity: 荷重ケース {c!r} がありません")
+            if _num(f, f"level2.gravity.{c}") != 1.0:
+                raise InputError("level2.gravity: 係数は 1.0 のみ対応しています")
+        kh = _num(d["kh"], "level2.kh") if d.get("kh") is not None else None
+        td = _num(d["target_displacement"], "level2.target_displacement") * M \
+            if d.get("target_displacement") is not None else None
+        if d and (kh is None) == (td is None):
+            raise InputError("level2: kh（照査用震度）と target_displacement（要求変位）のどちらか一方を指定してください")
+        crit = []
+        for c in d.get("criteria") or []:
+            if c in ("no_mechanism", "no_inground_plastic"):
+                crit.append(c)
+            elif isinstance(c, dict) and set(c) == {"pile_rotation"}:
+                crit.append({"pile_rotation": _num(c["pile_rotation"], "level2.criteria.pile_rotation")})
+            else:
+                raise InputError(f"level2.criteria: no_mechanism, no_inground_plastic, "
+                                 f"{{pile_rotation: 値}} から指定してください: {c!r}")
+        r = _num(d.get("post_yield_ratio", 0.001), "level2.post_yield_ratio")
+        if not 0 < r < 1:
+            raise InputError("level2.post_yield_ratio: 0 < r < 1 としてください")
+        self.level2 = {
+            "given": bool(d), "directions": dirs, "gravity": [str(c) for c in grav],
+            "kh": kh, "target_displacement": td,
+            "max_displacement": _num(d.get("max_displacement", 1.0), "level2.max_displacement") * M,
+            "step": _num(d.get("step", 0.005), "level2.step") * M,
+            "post_yield_ratio": r,
+            "inground_depth": _num(d.get("inground_depth", 3.0), "level2.inground_depth"),
+            "criteria": crit,
         }
 
     @property

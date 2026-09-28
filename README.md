@@ -277,11 +277,12 @@ write_report(load_building("input.yaml"), "report.html")
 | P1 | 桟橋モデルの自動生成（上部工の梁、鋼管杭、仮想固定点）と線形解析 | 済 |
 | P2 | 荷重（自重・上載荷重・接岸力・牽引力・レベル1地震動）と部分係数による組合せ | 済 |
 | P3 | 照査（上部工 RC、鋼管杭、杭の支持力） | 済 |
-| P4 | レベル2地震動（プッシュオーバー） | 予定 |
+| P4 | レベル2地震動（プッシュオーバー）、地盤ばねモデル | 済 |
 | P5 | 計算書（HTML） | 予定 |
 
 ```
-python examples/pier_example.py examples/pier_example.yaml
+python examples/pier_example.py examples/pier_example.yaml    # 仮想固定点モデル（P1〜P3）
+python examples/pier_example.py examples/pier_level2.yaml     # 地盤ばねモデルとレベル2（P4）
 ```
 ```python
 from rcframe import load_model
@@ -354,6 +355,40 @@ checks:                     # 係数は見本（既定値も同じ）。示方�
 
 組合せの荷重係数は combinations で考慮済みとし、照査では構造物係数 γi を乗じる（構造解析係数 γa = 1.0）。
 式の形・係数のうち照合が必要な事項は `rcframe/port_check.py` の `VERIFY_ITEMS` に列挙。
+
+**地盤ばねモデルとレベル2（P4）**: 例 [examples/pier_level2.yaml](examples/pier_level2.yaml)
+
+```yaml
+piles:
+  model: soil_spring              # fixed_point（仮想固定点、既定）/ soil_spring（地盤ばね）
+  segment: 0.5                    # 地中部の分割長 [m]
+  rows:
+    L: {seabed: -4.0, kh: 20000, tip: -24.0, pu: 300}   # tip: 杭先端（省略時 海底面 − 5/β）、pu: 地盤反力度の上限 [kN/m²]（任意）
+level2:                           # 要求側と判定基準は入力（港湾基準で要確認）
+  directions: [+y, -y]
+  gravity: {D: 1.0, Ls: 1.0}      # 先に載せる長期荷重（係数は 1.0 のみ）
+  kh: 0.25                        # 照査用震度（または target_displacement: 要求変位 [m]）
+  max_displacement: 0.6           # 解析を打ち切る上部工の変位 [m]
+  step: 0.005                     # 1ステップの変位増分の上限 [m]
+  post_yield_ratio: 0.001
+  inground_depth: 3.0             # 地中部のヒンジを置く範囲（海底面から 3/β）
+  criteria: [no_mechanism, no_inground_plastic, {pile_rotation: 0.02}]
+```
+```python
+r = run_level2(pier, "+y")        # r.print(), r.ok, r.curve, r.demand, r.criteria, r.po（PushoverResult）
+```
+
+- **地盤ばねモデル**: 海底面より下の杭を分割し、各節点に水平地盤ばね k = kh·D·（負担長）を X・Y に配置。
+  杭先端は鉛直・ねじりを拘束。P1〜P3 の解析・照査もこのモデルで行える（杭の照査は地中部の各分割点も対象）。
+  杭頭固定の杭頭変位が Chang の解に一致することをテストで確認
+- **杭の塑性ヒンジ**: 全塑性モーメント Mp(N) = Zp·fy·cos(π|N|/2Ny)（腐食後の断面、Zp = (Do³ − Di³)/6）の
+  バイリニア。N は長期荷重時の値で固定。位置は杭頭と、仮想固定点（仮想固定点モデル）または海底面〜地中部の
+  各分割点（地盤ばねモデル）。載荷方向の曲げ面のみ
+- **地盤ばね**: pu を与えると弾完全塑性（上限 = pu·D·負担長）、なければ線形
+- **載荷**: 長期荷重の後、上部工の重心に水平力（荷重係数 = 換算震度 kh = 水平力/W）を比例増加。
+  事象追跡型の増分解析（建物編と同じ）
+- **判定**: 要求点（kh または要求変位）で、崩壊機構が形成されない・地中部（海底面を含む）が全塑性に達しない・
+  杭頭の塑性回転角が上限以下、から選択。上部工の梁は弾性とし、要求点で M ≦ Mu（材料係数 1.0）を確認（超えれば警告）
 
 **P2 の簡略化**: 張出し部の荷重は端の梁への線荷重（ねじりは無視）。防舷材・係船柱の力は海側の梁の両端節点へ
 てこの原理で配分（梁の局所的な曲げの影響は無視）。杭の慣性力・付加質量、車両・荷役機械の集中荷重の自動生成は

@@ -55,6 +55,7 @@ class PushoverResult:
     mechanism_step: int = None                    # 崩壊機構が形成されたステップ（mechanism_check 時）
     mechanism_stories: list = field(default_factory=list)   # 機構で変形が集中する層
     states: dict = field(default_factory=dict)    # step -> (変位, {eid: 可撓部端の材端力})（keep_states 時）
+    hinge_theta: dict = field(default_factory=dict)   # step -> {ばね: 回転角}（keep_states 時）
 
     @property
     def lateral(self):
@@ -99,7 +100,8 @@ class PushoverResult:
 
 def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_drift,
              labels=None, max_steps=20000, shear_caps=None, shear_labels=None,
-             mechanism_check=False, drift_marks=(), keep_states=False):
+             mechanism_check=False, drift_marks=(), keep_states=False,
+             node_springs=None, node_labels=None):
     """事象追跡型の荷重増分解析（入力形式に依存しない本体）
 
     hinges        : {(eid, 面, 端): Hinge}（端 0 = i端, 1 = j端）
@@ -112,9 +114,14 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
     mechanism_check: 降伏したばねを解放（ピン）した接線剛性で水平外力に対して不安定になったら
                     崩壊機構の形成とする（res.mechanism_step, res.mechanism_stories）
     drift_marks   : ステップを必ず区切る層間変形角（例 Qu 判定用の 1/100）
-    keep_states   : 各ステップの変位・部材端力を res.states に保存
+    keep_states   : 各ステップの変位・部材端力を res.states、ばねの回転角を res.hinge_theta に保存
+    node_springs  : {(節点, 自由度): EPSpring}  非線形の節点ばね（地盤ばね）。各ステップの接線剛性を
+                    model.node_springs[節点][自由度] に設定する（呼び出し側で元の値に戻すこと）
     戻り値: PushoverResult（final 以外。final は呼び出し側で設定）
     """
+    ns = dict(node_springs or {})
+    ns_labels = node_labels or {k: str(k) for k in ns}
+    ns_sigma = {k: 1 for k in ns}
     shear_caps = dict(shear_caps or {})
     shear_labels = shear_labels or {k: str(k) for k in shear_caps}
     sheared = set()
@@ -184,15 +191,26 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
             # ---- ばねの向きの仮定と解の整合（最大 20 回。整合しなければ警告を残して進む）
             for it in range(20):
                 tang = {key: hinges[key].tangent(sigma[key]) for key in hinges}
+                ntang = {key: ns[key].tangent(ns_sigma[key]) for key in ns}
+                for (nid, dof), t in ntang.items():
+                    model.node_springs[nid][dof] = t[0]
                 du, dface, dnode = solve(phase, tang)
                 dm = {key: spring_moment(dface[key[0]], key[1], key[2]) for key in hinges}
+                dF = {key: ntang[key][0] * du[6 * idx[key[0]] + key[1]] for key in ns}
                 scale = max((abs(v) for v in dm.values()), default=0.0)
+                fscale = max((abs(v) for v in dF.values()), default=0.0)
                 changed = False
                 for key, v in dm.items():
                     if abs(v) > 1e-9 * scale:
                         s = 1 if v > 0 else -1
                         if s != sigma[key]:
                             sigma[key] = s
+                            changed = True
+                for key, v in dF.items():
+                    if abs(v) > 1e-9 * fscale:
+                        s = 1 if v > 0 else -1
+                        if s != ns_sigma[key]:
+                            ns_sigma[key] = s
                             changed = True
                 if not changed:
                     break
@@ -207,6 +225,14 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                     continue
                 t = max(0.0, (lim - hinges[key].M) / v)
                 cand[key] = t
+                dl = min(dl, t)
+            ncand = {}
+            for key, v in dF.items():
+                k_t, lim, kind = ntang[key]
+                if abs(v) <= 1e-9 * fscale or math.isinf(lim):
+                    continue
+                t = max(0.0, (lim - ns[key].F) / v)
+                ncand[key] = t
                 dl = min(dl, t)
             rate = drifts(du)
             cur = drifts(u)
@@ -256,6 +282,15 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                                phase=phase)
                     evs.append(rec)
                     res.events.append(rec)
+            for key, sp_ in ns.items():
+                k_t, lim, kind = ntang[key]
+                hit = key in ncand and ncand[key] <= dl * (1 + 1e-9) + 1e-300
+                for ev in sp_.advance(dl * dF[key], hit, lim):
+                    rec = dict(step=step, key=key, label=ns_labels[key], event=ev, side=ns_sigma[key],
+                               lam=lam[phase], Q=Q, drift=max((abs(x) for x in dr), default=0.0),
+                               phase=phase)
+                    evs.append(rec)
+                    res.events.append(rec)
             if phase == "水平":
                 drift_now = max((abs(x) for x in dr), default=0.0)
                 for (eid, plane), cap in shear_caps.items():
@@ -291,6 +326,7 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                                   events=evs))
             if keep_states:
                 res.states[step] = (u.copy(), {eid: face[eid].copy() for eid in E})
+                res.hinge_theta[step] = {key: h.theta for key, h in hinges.items()}
             if phase == "長期" and lam[phase] >= 1.0 - 1e-12:
                 break
             if phase == "水平" and max(abs(x) for x in dr) >= max_drift * (1 - 1e-9):

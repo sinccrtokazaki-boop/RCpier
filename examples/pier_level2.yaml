@@ -1,0 +1,77 @@
+# 計算例: 直杭式横桟橋のレベル2地震動（桟橋編 P4）
+# pier_example.yaml と同じ桟橋を、杭を地盤ばねでモデル化して解析する
+# 単位: 高さ・通り芯 m（D.L. 基準）、断面寸法 mm、荷重 kN・kN/m・kN·m、kh kN/m³
+type: pier
+name: 桟橋計算例（レベル2）
+
+materials:
+  C24: {fck: 24}
+  SKK490: {steel: true, fy: 315}
+
+sections:
+  G1:
+    b: 1200
+    D: 1500
+    material: C24
+    cover: 70
+    rebar:
+      main: SD345
+      shear: SD345
+      dt: 100
+      end:    {top: 10-D32, bottom: 10-D32, stirrup: 4-D16@200}   # 地震時の下端引張に備えて下端も増やす
+      center: {top: 6-D29, bottom: 10-D32, stirrup: 4-D16@250}
+  P1:
+    pipe: {D: 1000, t: 14}
+    material: SKK490
+    corrosion: {outer: 2.0, inner: 0.0}          # 全塑性モーメントは腐食後の断面で算定
+    stiffness: intact
+
+grids:
+  x: {B1: 0, B2: 6, B3: 12, B4: 18, B5: 24, B6: 30, B7: 36, B8: 42}
+  y: {L: 0, M: 7, S: 14}
+
+deck:
+  top: 3.0
+  model_level: 2.25
+  soffit: 1.5
+  slab_thickness: 0.40
+  overhang: {sea: 1.5, land: 0.0}
+
+unit_weight: {rc: 24.5}
+
+beams:
+  - {at: "*", section: G1}
+
+piles:
+  section: P1
+  model: soil_spring                # 地盤ばねモデル（fixed_point = 仮想固定点）
+  segment: 0.5                      # 地中部の分割長 [m]
+  rows:                             # tip: 杭先端（省略時は海底面 − 5/β）、pu: 地盤反力度の上限 [kN/m²]（省略時は線形）
+    L: {seabed: -4.0,  kh: 20000, tip: -24.0, Rcd: 5000, Rtd: 2000}
+    M: {seabed: -8.0,  kh: 20000, tip: -28.0, Rcd: 6000, Rtd: 2500}
+    S: {seabed: -12.0, kh: 15000, tip: -32.0, Rcd: 7000, Rtd: 3000}
+
+actions:
+  D: {pavement: 2.0}
+  L: {surcharge: 20.0}
+  Ls: {surcharge: 10.0}
+  EQ: {kh: 0.15, directions: [x, y]}
+
+combinations:                       # 係数は見本（港湾基準で要確認）
+  永続_常時:   {state: 永続, factors: {D: 1.0, L: 1.0}}
+  L1地震_+Y:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQy: 1.0}}
+  L1地震_-Y:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQy: -1.0}}
+
+# レベル2地震動のプッシュオーバー。要求側と判定基準は入力（港湾基準で要確認）
+level2:
+  directions: [+y, -y]              # 法線直角方向（海側・陸側）
+  gravity: {D: 1.0, Ls: 1.0}        # 先に載せる長期荷重
+  kh: 0.25                          # 照査用震度（要求水平力 = kh × W）。要求変位なら target_displacement [m]
+  max_displacement: 0.6             # 解析を打ち切る上部工の変位 [m]
+  step: 0.005                       # 1ステップの変位増分の上限 [m]
+  post_yield_ratio: 0.001           # 杭の塑性ヒンジの降伏後剛性比
+  inground_depth: 3.0               # 地中部のヒンジを置く深さ（海底面から 3/β まで）
+  criteria:
+    - no_mechanism                  # 要求点までに崩壊機構ができない
+    - no_inground_plastic           # 地中部が全塑性に達しない
+    - {pile_rotation: 0.02}         # 杭頭の塑性回転角 [rad]

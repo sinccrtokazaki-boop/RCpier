@@ -163,7 +163,7 @@ def run_pier_checks(pier, results=None):
 
     # ---- 上部工の梁
     for key, eid in sorted(pier.elem_ids.items(), key=lambda kv: kv[1]):
-        if key[0] == "p":
+        if key[0] in ("p", "pg"):                          # 杭（自由長部・地中部）は除く
             continue
         e = m.elements[eid]
         rb, s, mat = e.sec.rebar, e.sec, e.mat
@@ -211,9 +211,14 @@ def run_pier_checks(pier, results=None):
         fyd = mat.fy / opt["pile"]["gamma_m"]
         label = pier.label("elem", p["eid"])
         Rcd, Rtd = pier.pile_capacity.get(j, (None, None))
+        # 検定位置: 杭頭と自由長部の下端（仮想固定点 / 海底面）、地盤ばねモデルでは地中部の各分割点
+        soil = pier.pile_model == "soil_spring"
+        spots = [(p["eid"], "杭頭", e.L - e.rigid_j), (p["eid"], "海底面" if soil else "固定点", 0.0)]
+        for k, sid in enumerate(p.get("segments", [])):
+            spots.append((sid, f"地中{k + 1}", 0.0))       # 各分割の下端
         for c in strength:
-            for pos, x in (("固定点", 0.0), ("杭頭", e.L - e.rigid_j)):
-                sf = combos[c].section_forces_at(p["eid"], x)
+            for eid_, pos, x in spots:
+                sf = combos[c].section_forces_at(eid_, x)
                 N = -sf[0]                                   # 圧縮正
                 M = math.hypot(sf[4], sf[5])
                 Q = math.hypot(sf[1], sf[2])
