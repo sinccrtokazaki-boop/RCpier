@@ -10,13 +10,15 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 計算例: `python examples/two_story_frame.py` / `python examples/from_yaml.py [入力.yaml]`
 
 ## 構成
-- `rcframe/materials.py` : Concrete（RC規準式のE）, RectSection（剛性増大率 phi_y/phi_z）
+- `rcframe/materials.py` : Concrete（RC規準式のE）, RectSection（剛性増大率 phi_y/phi_z）, 鋼種・配筋
 - `rcframe/element.py`   : 12x12 局所剛性（Timoshenko）、座標変換、剛域変換、等分布・区分線形分布荷重
 - `rcframe/model.py`     : Model（入力、剛域自動設定、剛床拘束、組立、求解）
-- `rcframe/results.py`   : Result（断面力、反力、層間変形角、荷重組合せ）
+- `rcframe/results.py`   : Result（断面力、任意位置の断面力、反力、層間変形角、荷重組合せ）
 - `rcframe/building.py`  : Building（通り芯・階・配置ルールから Model を生成、剛床・荷重も設定）
 - `rcframe/io_yaml.py`   : YAML → dict → Building（書式は README.md）
 - `rcframe/loads.py`     : 亀甲分割の負担幅、T・Rt・Ai・地震層せん断力（入力形式に依存しない計算のみ）
+- `rcframe/design.py`    : RC規準 2018 の許容応力度・許容曲げモーメント Ma(N)・許容せん断力（計算のみ）
+- `rcframe/check.py`     : 荷重組合せと全部材の検定（run_checks → CheckReport）
 
 ## 規約（変更しないこと）
 - 単位: mm, N。表示のみ kN, kN·m
@@ -37,10 +39,11 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 
 ## ロードマップ（README.md 参照）
 1 済: 線形弾性エンジン → 2 済: モデル自動生成（YAML） → 3 済: 荷重自動生成（Ai分布等）
-→ 4: 断面算定（RC規準）→ 5: 非線形（材端ばね・増分法）→ 6: 保有水平耐力 → 7: 可視化・計算書
+→ 4 済: 断面算定（RC規準 2018）→ 5: 非線形（材端ばね・増分法）→ 6: 保有水平耐力 → 7: 可視化・計算書
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
 - 柱梁接合部変形、壁・ブレースは未対応
 - 剛床は 1 階につき 1 つ（床が分断されても 1 つ）。自動生成は直交通り芯のみ
 - 床荷重は通り芯区画単位（小梁・片持ちスラブ未対応）。梁自重は b×D（スラブ重複を控除しない）
+- 断面算定: 柱は X・Y 独立（2軸曲げ未対応）、中段筋無視、付着・接合部・曲げ降伏時せん断は未対応

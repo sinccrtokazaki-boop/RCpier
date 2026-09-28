@@ -1,14 +1,17 @@
 """解析結果の保持・整形・荷重組合せ"""
 import numpy as np
 
+from .element import _profile_samples
+
 
 class Result:
-    def __init__(self, model, case, disp, forces, reactions):
+    def __init__(self, model, case, disp, forces, reactions, factors=None):
         self.model = model
         self.case = case
         self.disp = disp            # nid -> 6
         self.forces = forces        # eid -> {"face": 12, "node": 12}（部材に作用する局所端力）
         self.reactions = reactions  # nid -> 6
+        self.factors = factors or {case: 1.0}   # 荷重ケース -> 係数（組合せ結果の部材荷重の復元用）
 
     # -------------------------------------------------- 断面力（設計用符号）
     def section_forces(self, eid, at="face"):
@@ -18,6 +21,40 @@ class Result:
         """
         f = self.forces[eid][at]
         return -f[:6], f[6:]
+
+    def section_forces_at(self, eid, x):
+        """i節点から距離 x [mm] の位置の断面力 (N, Qy, Qz, Mx, My, Mz)
+        符号は section_forces と同じ（x = 0 で i端、x = L で j端の節点位置の値）
+
+        i端側の部分 [0, x] の釣合いから求める（部材荷重は剛域上も含めて考慮）:
+            F(x) = −F_i − ∫q dt
+            My(x) = −My_i − x·Fz_i − ∫(x−t)·qz dt
+            Mz(x) = −Mz_i + x·Fy_i + ∫(x−t)·qy dt
+        水平梁（局所 z 上向き）では My > 0 が上端引張
+        """
+        e = self.model.elements[eid]
+        f = self.forces[eid]["node"]
+        Fi, Mi = f[0:3], f[3:6]
+        q0 = np.zeros(3)    # ∫_0^x q dt
+        q1 = np.zeros(3)    # ∫_0^x (x − t) q dt
+        for case, c in self.factors.items():
+            for le, w, profile in self.model.member_loads.get(case, []):
+                if le != eid:
+                    continue
+                wl = c * (e.R @ w)
+                if profile is None:
+                    q0 += wl * x
+                    q1 += wl * x ** 2 / 2
+                else:
+                    t, wt = _profile_samples(profile, 0.0, x)
+                    q0 += wl * np.sum(wt)
+                    q1 += wl * np.sum(wt * (x - t))
+        s = np.zeros(6)
+        s[0:3] = -Fi - q0
+        s[3] = -Mi[0]
+        s[4] = -Mi[1] - x * Fi[2] - q1[2]
+        s[5] = -Mi[2] + x * Fi[1] + q1[1]
+        return s
 
     # -------------------------------------------------- 荷重組合せ
     @staticmethod
@@ -29,7 +66,11 @@ class Result:
         forces = {e: {k: sum(c * r.forces[e][k] for r, c in items) for k in ("face", "node")}
                   for e in r0.forces}
         reac = {n: sum(c * r.reactions[n] for r, c in items) for n in r0.reactions}
-        return Result(r0.model, name, disp, forces, reac)
+        fac = {}
+        for r, c in items:
+            for case, k in r.factors.items():
+                fac[case] = fac.get(case, 0.0) + c * k
+        return Result(r0.model, name, disp, forces, reac, fac)
 
     # -------------------------------------------------- 層間変形角
     def story_drifts(self, masters_by_level, direction=0, base_z=None):

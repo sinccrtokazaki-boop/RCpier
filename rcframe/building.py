@@ -21,7 +21,8 @@
 import math
 
 from .loads import TC, seismic_story_forces, tributary_profiles
-from .materials import Concrete, RectSection
+from .materials import (STEELS, Bars, BeamBars, BeamRebar, ColumnRebar, Concrete, Hoop,
+                        RectSection, SteelGrade)
 from .model import Model
 
 # YAML の荷重欄の単位（実務の慣用単位）→ 内部単位 mm, N
@@ -73,13 +74,16 @@ class Building:
     """
     TOP_KEYS = ("name", "materials", "sections", "defaults", "grids", "floors",
                 "columns", "beams", "openings", "loads",
-                "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic")
+                "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic",
+                "steels", "design")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
         self.name = str(data.get("name", "building"))
         self._read_materials(data.get("materials") or {})
+        self._read_steels(data.get("steels") or {})
         self._read_sections(data.get("sections") or {})
+        self._read_design(data.get("design") or {})
         d = data.get("defaults") or {}
         _check_keys(d, ("material",), "defaults")
         self.default_material = d.get("material")
@@ -115,16 +119,78 @@ class Building:
             kw = {k: _num(d[k], f"材料 {name}.{k}") for k in d}
             self.materials[str(name)] = Concrete(str(name), **kw)
 
+    def _read_steels(self, steels):
+        self.steels = dict(STEELS)
+        for name, d in steels.items():
+            what = f"鋼種 {name}"
+            d = d or {}
+            _check_keys(d, ("F", "ftL", "ftL_D29"), what)
+            base = STEELS.get(str(name))
+            if base is None and "F" not in d:
+                raise InputError(f"{what}: 既定表にない鋼種は F を指定してください")
+            F = _num(d.get("F", base.F if base else None), f"{what}.F")
+            ftL = _num(d.get("ftL", base.ftL if base else min(F, 195.0)), f"{what}.ftL")
+            ftL29 = _num(d.get("ftL_D29", base.ftL_D29 if base else ftL), f"{what}.ftL_D29")
+            self.steels[str(name)] = SteelGrade(str(name), F, ftL, ftL29)
+
     def _read_sections(self, secs):
         self.sections, self.section_material = {}, {}
         for name, d in secs.items():
-            _check_keys(d, ("b", "D", "phi_y", "phi_z", "kappa", "material"), f"断面 {name}")
+            _check_keys(d, ("b", "D", "phi_y", "phi_z", "kappa", "material", "rebar"), f"断面 {name}")
             for k in ("b", "D"):
                 if k not in d:
                     raise InputError(f"断面 {name}: {k} がありません")
-            kw = {k: _num(v, f"断面 {name}.{k}") for k, v in d.items() if k != "material"}
-            self.sections[str(name)] = RectSection(str(name), **kw)
+            kw = {k: _num(v, f"断面 {name}.{k}") for k, v in d.items()
+                  if k not in ("material", "rebar")}
+            sec = RectSection(str(name), **kw)
+            if d.get("rebar") is not None:
+                sec.rebar = self._read_rebar(d["rebar"], f"断面 {name} の配筋")
+            self.sections[str(name)] = sec
             self.section_material[str(name)] = d.get("material")
+
+    def _read_rebar(self, r, what):
+        """梁（end/center）または柱（x/y/hoop_x/hoop_y）の配筋"""
+        is_beam = "end" in r or "center" in r
+        keys = ("main", "shear", "dt") + (("end", "center") if is_beam
+                                          else ("x", "y", "hoop_x", "hoop_y"))
+        _check_keys(r, keys, what)
+        missing = [k for k in keys if k not in r]
+        if missing:
+            raise InputError(f"{what}: {missing} がありません")
+        steel = {}
+        for k in ("main", "shear"):
+            if str(r[k]) not in self.steels:
+                raise InputError(f"{what}: 未定義の鋼種 {r[k]!r}")
+            steel[k] = self.steels[str(r[k])]
+        dt = _num(r["dt"], f"{what}.dt")
+        try:
+            if is_beam:
+                pos = {}
+                for p in ("end", "center"):
+                    _check_keys(r[p], ("top", "bottom", "stirrup"), f"{what}.{p}")
+                    if set(r[p]) != {"top", "bottom", "stirrup"}:
+                        raise InputError(f"{what}.{p}: top, bottom, stirrup をすべて指定してください")
+                    pos[p] = BeamBars(Bars.parse(r[p]["top"]), Bars.parse(r[p]["bottom"]),
+                                      Hoop.parse(r[p]["stirrup"]))
+                return BeamRebar(steel["main"], steel["shear"], dt, pos["end"], pos["center"])
+            x, y = Bars.parse(r["x"]), Bars.parse(r["y"])
+            if x.n < 2 or y.n < 2:
+                raise InputError(f"{what}: 1面の本数は隅筋を含めて 2 本以上です")
+            return ColumnRebar(steel["main"], steel["shear"], dt, x, y,
+                               Hoop.parse(r["hoop_x"]), Hoop.parse(r["hoop_y"]))
+        except ValueError as ex:
+            if isinstance(ex, InputError):
+                raise
+            raise InputError(f"{what}: {ex}") from None
+
+    def _read_design(self, d):
+        _check_keys(d, ("shear_factor", "young_ratio", "long", "seismic"), "design")
+        self.design = {
+            "shear_factor": _num(d.get("shear_factor", 1.5), "design.shear_factor"),
+            "young_ratio": _num(d.get("young_ratio", 15), "design.young_ratio"),
+            "long": [str(c) for c in _as_list(d["long"])] if d.get("long") else None,
+            "seismic": [str(c) for c in _as_list(d["seismic"])] if d.get("seismic") else None,
+        }
 
     def _read_grids(self, grids):
         if not isinstance(grids, dict) or set(grids) != {"x", "y"}:

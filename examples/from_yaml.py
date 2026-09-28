@@ -6,7 +6,7 @@
 """
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from rcframe import Result, load_building
+from rcframe import Result, load_building, run_checks
 
 path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("two_story_frame.yaml")
 bld = load_building(path)
@@ -41,3 +41,7 @@ if "Ex" in res and long_term:
     name = "+".join(long_term + ["Ex"])
     comb = Result.combine(name, {res[c]: 1.0 for c in long_term + ["Ex"]})
     comb.print_section_forces("face", cols_1F)
+
+# 配筋のある断面があれば断面検定（RC規準）
+if any(s.rebar for s in bld.sections.values()):
+    run_checks(bld, res).print_summary()

@@ -1,0 +1,72 @@
+# 計算例: 断面算定（フェーズ4）
+# 建物・荷重は two_story_auto_loads.yaml と同じ。断面に配筋を追加して RC規準で検定する
+# 単位: 寸法 mm。床荷重 kN/m²、単位体積重量 kN/m³、追加重量 kN
+name: 2F-RC-design
+
+materials:
+  Fc24: {Fc: 24}
+
+sections:
+  C1:
+    b: 600
+    D: 600
+    rebar:
+      main: SD345
+      shear: SD295
+      dt: 70                  # 主筋重心から材縁まで
+      x: 5-D25                # X方向の曲げに対する 1面の本数（隅筋を含む）
+      y: 5-D25
+      hoop_x: 2-D13@100
+      hoop_y: 2-D13@100
+  G1:
+    b: 400
+    D: 700
+    phi_y: 1.5
+    rebar: &G_REBAR
+      main: SD345
+      shear: SD295
+      dt: 70
+      end:    {top: 4-D25, bottom: 3-D25, stirrup: 2-D13@150}
+      center: {top: 2-D25, bottom: 3-D25, stirrup: 2-D13@150}
+  G2:
+    b: 400
+    D: 700
+    phi_y: 2.0
+    rebar: *G_REBAR           # G1 と同じ配筋（YAML のアンカー）
+
+defaults:
+  material: Fc24
+
+grids:
+  x: {X1: 0, X2: 6000, X3: 12000}
+  y: {Y1: 0, Y2: 7000}
+
+floors:
+  1F: 0
+  2F: 4000
+  RF: 7500
+
+columns:
+  - {at: "*", section: C1}
+beams:
+  - {at: "*", section: G1}
+  - {at: "X2/Y1-Y2", section: G2}
+
+floor_loads:
+  事務室: {DL: 6.0, LL_frame: 1.8, LL_seismic: 0.8}
+  屋上:   {DL: 7.0, LL_frame: 0.65, LL_seismic: 0.3}
+floor_use:
+  - {area: "*", use: 事務室}
+  - {floor: RF, area: "*", use: 屋上}
+self_weight: {gamma: 24.0}
+extra_weights:
+  RF: 150
+
+seismic:
+  Z: 1.0
+  soil: 2
+  C0: 0.2
+  directions: [x, y]
+
+design:
+  shear_factor: 1.5           # 短期 QD = QL + 1.5·QE

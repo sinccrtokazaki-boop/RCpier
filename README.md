@@ -1,7 +1,7 @@
 # rcframe — RC造 3次元フレーム解析システム
 
 実務の設計補助を目的とした、Python 製の RC 造立体骨組解析プログラムです。
-現在はフェーズ3（荷重の自動生成）まで実装しています。
+現在はフェーズ4（断面算定: RC規準の許容応力度検定）まで実装しています。
 
 ## 動作環境
 Python 3.10 以上、numpy、scipy、PyYAML（テストには pytest）
@@ -12,6 +12,7 @@ python -m pytest tests          # 理論解との照合テスト
 python examples/two_story_frame.py
 python examples/from_yaml.py examples/two_story_frame.yaml
 python examples/from_yaml.py examples/two_story_auto_loads.yaml   # 荷重の自動生成
+python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定
 ```
 
 ## 実装済みの機能
@@ -28,6 +29,8 @@ python examples/from_yaml.py examples/two_story_auto_loads.yaml   # 荷重の自
 - 通り芯・階・断面リストからのモデル自動生成（YAML 入力、剛域・剛床も自動）
 - 荷重の自動生成: 床荷重の亀甲分割による梁への分配、部材自重、地震用重量と重心、
   Ai 分布による地震力（重心に作用）、偶発偏心
+- 部材の任意位置の断面力（`Result.section_forces_at`）
+- 断面算定（RC規準 2018）: 長期・短期の荷重組合せ、梁の曲げ・せん断、柱の軸力と曲げ・せん断、構造規定の警告
 
 ## 入力ファイル（YAML）
 例: [examples/two_story_frame.yaml](examples/two_story_frame.yaml)
@@ -106,6 +109,65 @@ YAML の注意: `300e3` のような指数表記は PyYAML では文字列にな
 - **偶発偏心**: 重心を荷重と直交方向に ±e×（床の外形寸法）ずらしたケースを追加
 - 計算表は `bld.print_seismic_table()` で表示（Wi, ΣWi, αi, Ai, Ci, Qi, Pi, 重心）
 
+### 断面算定（配筋と検定）
+例: [examples/two_story_design.yaml](examples/two_story_design.yaml)
+
+```python
+from rcframe import load_building, run_checks
+bld = load_building("examples/two_story_design.yaml")
+rep = run_checks(bld)          # 必要な荷重ケースはここで解析する
+rep.print_summary()            # 部材ごとの曲げ・せん断の最大検定比
+rep.print_detail()             # 位置・方向ごと
+rep.ng, rep.warnings, rep.max_ratio
+```
+
+**配筋**は断面に `rebar` として書きます（配筋のない断面は検定しません）。
+`4-D25` = 本数-呼び径（D10〜D41）、`2-D10@200` = 本数-呼び径@ピッチ。
+
+```yaml
+sections:
+  G1:                           # 梁: 両端共通の end と中央の center
+    b: 400
+    D: 700
+    rebar:
+      main: SD345               # 主筋の鋼種
+      shear: SD295              # せん断補強筋の鋼種
+      dt: 70                    # 主筋重心から材縁まで [mm]
+      end:    {top: 4-D25, bottom: 3-D25, stirrup: 2-D13@150}
+      center: {top: 2-D25, bottom: 3-D25, stirrup: 2-D13@150}
+  C1:                           # 柱: 柱頭・柱脚共通
+    b: 600
+    D: 600
+    rebar:
+      main: SD345
+      shear: SD295
+      dt: 70
+      x: 5-D25                  # X方向の曲げに対する 1面の本数（隅筋を含む）
+      y: 5-D25
+      hoop_x: 2-D13@100         # X方向のせん断に効く帯筋
+      hoop_y: 2-D13@100
+```
+
+階ごとに配筋を変えるときは断面名を分けて（`G1-2F` 等）配置ルールで割り当てます。
+
+| 項目 | 書式 | 内容 |
+|---|---|---|
+| `steels` | `{鋼種: {F, ftL, ftL_D29}}` | 既定は SD295 / SD345 / SD390。既定表にない鋼種は F 必須 |
+| `design` | `{shear_factor, young_ratio, long, seismic}` | 短期せん断の割増し n（既定 1.5）、ヤング係数比（既定 15）、長期・地震の荷重ケース名（既定 G, P と E で始まるケース） |
+
+**検定の内容**（日本建築学会「鉄筋コンクリート構造計算規準・同解説」2018年版）
+- 許容応力度（6条）: コンクリート fc = Fc/3（短期 2Fc/3）、fs = min(Fc/30, 0.49+Fc/100)（短期 1.5 倍）。
+  主筋 長期 SD295 195、SD345・SD390 215（D29 以上 195）、短期 F。せん断補強筋 長期 195、短期 F（上限 390）
+- 荷重組合せ（施行令第82条）: 長期 G+P、短期 G+P±E（地震の各ケース・偶発偏心ケース）
+- 梁（両端フェイス・中央）: 曲げは複筋梁の許容曲げモーメント（13条、軸力無視）、
+  せん断は QAL = b·j·α·fs、QAS = b·j·{(2/3)α·fs + 0.5·wft·(pw−0.002)}
+- 柱（柱脚・柱頭フェイス、X・Y 方向を独立に）: 軸力 N を考慮した許容曲げモーメント Ma(N)（14条）、
+  せん断は QAL = b·j·α·fs、QAS = b·j·{fs + 0.5·wft·(pw−0.002)}
+- 短期の設計用せん断力 QD = QL + n·QE（15条）、α = 4/(M/(Q·d)+1)（1〜2）、j = 7d/8、pw ≦ 1.2%
+- 許容曲げモーメントは平面保持・弾性（n = 15、コンクリートの引張無視）で、コンクリート圧縮縁・
+  引張鉄筋・圧縮鉄筋のいずれかが許容応力度に達するときの値
+- 構造規定の警告: 梁・柱の pw ≧ 0.2%、柱の pg ≧ 0.8%
+
 部材荷重を Python から与える場合は `Model.add_member_load(case, eid, w, profile=[(x, 係数), ...])`
 で区分線形の分布を指定できます（x は i節点からの距離 [mm]）。
 
@@ -124,7 +186,7 @@ YAML の注意: `300e3` のような指数表記は PyYAML では文字列にな
 | 1 | 線形弾性解析エンジン（剛域・剛床・せん断変形） | 済 |
 | 2 | 入力の効率化（通り芯・階からのモデル自動生成、入力ファイル形式） | 済 |
 | 3 | 荷重の自動生成（床荷重の梁への分配、Ai分布による地震力、偏心） | 済 |
-| 4 | 断面算定（RC規準: 曲げ・せん断の許容応力度検定） | 予定 |
+| 4 | 断面算定（RC規準: 曲げ・せん断の許容応力度検定） | 済 |
 | 5 | 非線形解析（材端剛塑性ばね、トリリニア骨格曲線、荷重増分法） | 予定 |
 | 6 | 保有水平耐力（Ds・Fes、崩壊形の判定） | 予定 |
 | 7 | 3D可視化・計算書出力 | 予定 |
@@ -137,3 +199,6 @@ YAML の注意: `300e3` のような指数表記は PyYAML では文字列にな
 - 床荷重は通り芯で囲まれた区画単位（小梁による区画の分割、片持ちスラブは未対応）
 - 梁の自重は b×D で算定し、スラブとの重複を差し引かない（安全側）
 - 地震力は RC造として T = 0.02h（α = 0）。剛床のない階がある建物には Ai 分布の地震力を作用させられない
+- 断面算定: 柱の 2軸曲げの同時考慮、付着、柱梁接合部、曲げ降伏時せん断力による設計は未対応。
+  梁の軸力・弱軸曲げは無視。柱の曲げは各方向の 1面の主筋のみ考慮（中段筋は無視）。
+  梁の中央はスパン中央の値で検定（スパン内の最大正曲げ位置ではない）。梁の左右端部は同一配筋
