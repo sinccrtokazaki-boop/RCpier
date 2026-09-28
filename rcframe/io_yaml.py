@@ -11,7 +11,9 @@ def building_from_yaml(text: str) -> Building:
     data = yaml.safe_load(text)
     if not isinstance(data, dict):
         raise InputError("YAML のトップレベルは辞書形式で記述してください")
-    return Building(data)
+    bld = Building(data)
+    bld.source_text = text      # 計算書の付録に載せる
+    return bld
 
 
 def load_building(path) -> Building:

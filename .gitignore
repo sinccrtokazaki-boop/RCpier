@@ -8,6 +8,10 @@ __pycache__/
 # テスト
 .pytest_cache/
 
+# 出力した計算書
+*_report.html
+report.html
+
 # エディタ・OS
 .vscode/
 Thumbs.db

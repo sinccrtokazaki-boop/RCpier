@@ -75,7 +75,7 @@ class Building:
     TOP_KEYS = ("name", "materials", "sections", "defaults", "grids", "floors",
                 "columns", "beams", "openings", "loads",
                 "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic",
-                "steels", "design", "nonlinear", "ultimate")
+                "steels", "design", "nonlinear", "ultimate", "report")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -91,6 +91,10 @@ class Building:
         self._read_grids(data.get("grids"))
         self._read_floors(data.get("floors"))
         self._read_ultimate(data.get("ultimate") or {})      # 階名を参照するので floors の後
+        rp = data.get("report") or {}
+        _check_keys(rp, ("title", "author", "date", "notes"), "report")
+        self.report = {k: str(rp[k]) for k in rp if rp[k] is not None}   # 計算書の表紙
+        self.source_text = None                               # 入力ファイルの全文（io_yaml が設定）
 
         self.cols = {}       # (f, ix, iy) -> (RectSection, Concrete)
         self.beams = {}      # ("x", f, iy, ix) / ("y", f, ix, iy) -> (RectSection, Concrete)

@@ -128,6 +128,53 @@ def _story_drift(r, lower, upper, h, d):
     return (r.disp[upper][d] - lo) / h
 
 
+def _levels(bld):
+    """[(層名, 下の床のマスター or None, 上の床のマスター, 階高, 上の床の番号)]"""
+    levels = []
+    prev, z_prev = None, bld.floors[0][1]
+    for f, (_, z) in enumerate(bld.floors[1:], 1):
+        levels.append((bld.floors[f - 1][0], prev, bld.masters[f], z - z_prev, f))
+        prev, z_prev = bld.masters[f], z
+    return levels
+
+
+def stiffness_eccentricity(bld, lin):
+    """一次設計の線形解析結果 lin = {"Ex": Result, "Ey": Result} から剛性率・偏心率を求める
+
+    各柱の水平剛性 D = 柱のせん断力 / 層間変位（X: Ex の Qy、Y: Ey の Qz）
+    戻り値: (表の行のリスト, {(層名, "X"/"Y"): (Rs, Fs, Re, Fe)})
+    """
+    m = bld.model
+    levels = _levels(bld)
+    rows, fes = [], {}
+    for dname, case, d in (("X", "Ex", 0), ("Y", "Ey", 1)):
+        if case not in lin:
+            continue
+        drift = [abs(_story_drift(lin[case], lo, up, h, d)) for _, lo, up, h, _ in levels]
+        Rs = stiffness_ratios([1 / x for x in drift])
+        for k, (name, lo, up, h, f) in enumerate(levels):
+            cols = []
+            for (t, cf, i, j), eid in bld.elem_ids.items():
+                if t != "c" or cf != k:
+                    continue
+                nd = m.nodes[m.elements[eid].ni]
+                Dx = abs(lin["Ex"].forces[eid]["face"][1]) / abs(
+                    _story_drift(lin["Ex"], lo, up, h, 0) * h) if "Ex" in lin else 0.0
+                Dy = abs(lin["Ey"].forces[eid]["face"][2]) / abs(
+                    _story_drift(lin["Ey"], lo, up, h, 1) * h) if "Ey" in lin else 0.0
+                cols.append((nd.x, nd.y, Dx, Dy))
+            _, xg, yg = bld.weights[f]
+            ec = eccentricity(cols, xg, yg)
+            Re = ec["Rex"] if dname == "X" else ec["Rey"]
+            fes[(name, dname)] = (Rs[k], fs_factor(Rs[k]), Re, fe_factor(Re))
+            rows.append(dict(story=name, dir=dname, rs=1 / drift[k], drift=drift[k], h=h,
+                             Rs=Rs[k], Fs=fs_factor(Rs[k]),
+                             xg=xg, yg=yg, xk=ec["xk"], yk=ec["yk"],
+                             re=ec["rex"] if dname == "X" else ec["rey"],
+                             e=ec["ey"] if dname == "X" else ec["ex"], Re=Re, Fe=fe_factor(Re)))
+    return rows, fes
+
+
 def run_ultimate(bld, directions=("+x", "-x", "+y", "-y")) -> UltimateReport:
     """保有水平耐力の確認（Qu, Ds, Fes, Qun）"""
     m = bld.model
@@ -188,36 +235,8 @@ def run_ultimate(bld, directions=("+x", "-x", "+y", "-y")) -> UltimateReport:
                 col_info[(eid, plane)] = jm
 
     # ---- 剛性率・偏心率（一次設計）
-    fes = {}
-    levels = []
-    prev, z_prev = None, bld.floors[0][1]
-    for f, (_, z) in enumerate(bld.floors[1:], 1):
-        levels.append((bld.floors[f - 1][0], prev, bld.masters[f], z - z_prev, f))
-        prev, z_prev = bld.masters[f], z
-    for dname, case, d, qidx in (("X", "Ex", 0, 1), ("Y", "Ey", 1, 2)):
-        if case not in lin:
-            continue
-        drift = [abs(_story_drift(lin[case], lo, up, h, d)) for _, lo, up, h, _ in levels]
-        Rs = stiffness_ratios([1 / x for x in drift])
-        for k, (name, lo, up, h, f) in enumerate(levels):
-            cols = []
-            for (t, cf, i, j), eid in bld.elem_ids.items():
-                if t != "c" or cf != k:
-                    continue
-                nd = m.nodes[m.elements[eid].ni]
-                Dx = abs(lin["Ex"].forces[eid]["face"][1]) / abs(
-                    _story_drift(lin["Ex"], lo, up, h, 0) * h) if "Ex" in lin else 0.0
-                Dy = abs(lin["Ey"].forces[eid]["face"][2]) / abs(
-                    _story_drift(lin["Ey"], lo, up, h, 1) * h) if "Ey" in lin else 0.0
-                cols.append((nd.x, nd.y, Dx, Dy))
-            _, xg, yg = bld.weights[f]
-            ec = eccentricity(cols, xg, yg)
-            Re = ec["Rex"] if dname == "X" else ec["Rey"]
-            fes[(name, dname)] = (Rs[k], fs_factor(Rs[k]), Re, fe_factor(Re))
-            rep.ecc.append(dict(story=name, dir=dname, rs=1 / drift[k], Rs=Rs[k], Fs=fs_factor(Rs[k]),
-                                xg=xg, yg=yg, xk=ec["xk"], yk=ec["yk"],
-                                re=ec["rex"] if dname == "X" else ec["rey"],
-                                e=ec["ey"] if dname == "X" else ec["ex"], Re=Re, Fe=fe_factor(Re)))
+    rep.ecc, fes = stiffness_eccentricity(bld, lin)
+    levels = _levels(bld)
 
     # ---- 方向ごとのプッシュオーバーと判定
     lim = uo["drift_limit"]

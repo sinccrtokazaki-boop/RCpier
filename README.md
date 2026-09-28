@@ -1,7 +1,7 @@
 # rcframe — RC造 3次元フレーム解析システム
 
 実務の設計補助を目的とした、Python 製の RC 造立体骨組解析プログラムです。
-現在はフェーズ6（保有水平耐力の確認）まで実装しています。
+現在はフェーズ7（3D表示つき計算書の HTML 出力）まで、ロードマップのすべてを実装しています。
 
 ## 動作環境
 Python 3.10 以上、numpy、scipy、PyYAML（テストには pytest）
@@ -13,6 +13,7 @@ python examples/two_story_frame.py
 python examples/from_yaml.py examples/two_story_frame.yaml
 python examples/from_yaml.py examples/two_story_auto_loads.yaml   # 荷重の自動生成
 python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定・プッシュオーバー・保有水平耐力
+python -m rcframe.report examples/two_story_design.yaml -o report.html   # 計算書（HTML）
 ```
 
 ## 実装済みの機能
@@ -35,6 +36,8 @@ python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定
   事象追跡型の荷重増分法、長期荷重 → Ai 分布の水平力、ひび割れ・降伏の発生順序
 - 保有水平耐力の確認: せん断終局強度（荒川式）と破壊形式、部材種別・部材群・Ds、
   剛性率・偏心率と Fes、崩壊機構の検出、Qu ≧ Qun の判定
+- 計算書の HTML 出力: 1ファイルで完結（外部参照なし）、3D モデルの回転・変形図・ヒンジ表示、
+  伏図・軸組図・曲げモーメント図・検定比図・ヒンジ図・荷重変形曲線、A4 印刷用 CSS
 
 ## 入力ファイル（YAML）
 例: [examples/two_story_frame.yaml](examples/two_story_frame.yaml)
@@ -243,6 +246,25 @@ ultimate:
 - **Fes = Fs·Fe**（令82条の6、昭55建告第1791号・第1792号 第7）: 一次設計の線形解析（Ex, Ey）の層間変形から
   剛性率 Rs、柱の水平剛性 D（柱のせん断力 / 層間変位）から剛心・ねじり剛性・弾力半径・偏心率 Re
 
+### 計算書（HTML）
+```
+python -m rcframe.report input.yaml -o report.html
+```
+```python
+from rcframe import load_building, write_report
+write_report(load_building("input.yaml"), "report.html")
+```
+
+- CSS・JavaScript・図をすべて埋め込んだ 1つの HTML ファイル（インターネット接続なしでブラウザで開ける）
+- 入力の内容に応じて章を出力: 建物概要（伏図・全体図）、荷重、応力解析（3D 表示、軸組図の曲げモーメント図、
+  支点反力）、層間変形角・剛性率・偏心率、断面検定（検定比の表と軸組図）、プッシュオーバー（荷重変形曲線、
+  ヒンジ図）、保有水平耐力、付録（照合が必要な事項・既知の簡略化・警告・入力データ）。
+  配筋がなければ断面検定以降、ultimate / nonlinear の指定がなければ該当章を省略
+- 3D 表示: ドラッグで回転、ホイールで拡大縮小、荷重ケース・プッシュオーバー最終状態の変形図（倍率調整）、
+  ひび割れ・降伏したばねの表示
+- 印刷（A4）: 章ごとに改ページ、3D 表示は印刷せず全体図（静止図）を用いる
+- 表紙は任意: `report: {title, author, date, notes}`
+
 部材荷重を Python から与える場合は `Model.add_member_load(case, eid, w, profile=[(x, 係数), ...])`
 で区分線形の分布を指定できます（x は i節点からの距離 [mm]）。
 
@@ -264,7 +286,7 @@ ultimate:
 | 4 | 断面算定（RC規準: 曲げ・せん断の許容応力度検定） | 済 |
 | 5 | 非線形解析（材端剛塑性ばね、トリリニア骨格曲線、荷重増分法） | 済 |
 | 6 | 保有水平耐力（Ds・Fes、崩壊形の判定） | 済 |
-| 7 | 3D可視化・計算書出力 | 予定 |
+| 7 | 3D可視化・計算書出力 | 済 |
 
 ## 既知の簡略化
 - 柱の自動剛域は、3次元で方向ごとに異なる値の最小値を採用

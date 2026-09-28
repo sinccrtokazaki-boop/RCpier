@@ -3,6 +3,11 @@
 # 単位: 寸法 mm。床荷重 kN/m²、単位体積重量 kN/m³、追加重量 kN
 name: 2F-RC-design
 
+report:                       # 計算書（HTML）の表紙（任意）
+  title: 構造計算書（計算例）RC造 2階建て
+  author: rcframe
+  notes: 2スパン×1スパン 立体ラーメン。python -m rcframe.report examples/two_story_design.yaml
+
 materials:
   Fc24: {Fc: 24}
 

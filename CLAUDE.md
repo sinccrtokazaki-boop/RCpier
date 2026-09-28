@@ -8,6 +8,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 ## コマンド
 - テスト: `python -m pytest tests -q`
 - 計算例: `python examples/two_story_frame.py` / `python examples/from_yaml.py [入力.yaml]`
+- 計算書: `python -m rcframe.report 入力.yaml -o report.html`
 
 ## 構成
 - `rcframe/materials.py` : Concrete（RC規準式のE）, RectSection（剛性増大率 phi_y/phi_z）, 鋼種・配筋
@@ -24,7 +25,10 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - `rcframe/pushover.py`  : 事象追跡型の荷重増分解析（本体 pushover は入力形式に非依存、run_pushover は Building 用）
   - ばねは Element.springs（柔性 [面][端]）で element.py の local_stiffness_springs に渡す。解析後は None に戻す
 - `rcframe/ultimate.py`  : 荒川式 Qsu、部材種別・部材群・Ds、剛性率・偏心率・Fs・Fe（計算のみ）
-- `rcframe/capacity.py`  : 保有水平耐力の確認（run_ultimate → UltimateReport）
+- `rcframe/capacity.py`  : 保有水平耐力の確認（run_ultimate → UltimateReport）、剛性率・偏心率（stiffness_eccentricity）
+- `rcframe/svg.py`       : 計算書の図（軸組図・伏図・モーメント図・曲線）。モーメント図は引張側に描く
+- `rcframe/report.py`    : 計算書 HTML（1ファイル完結、外部参照禁止）。計算は既存関数を呼ぶだけで整形のみ
+  - 規準書で照合が必要な事項は VERIFY_ITEMS、既知の簡略化は KNOWN_SIMPLIFICATIONS（README と揃える）
 
 ## 規約（変更しないこと）
 - 単位: mm, N。表示のみ kN, kN·m
@@ -45,7 +49,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 
 ## ロードマップ（README.md 参照）
 1 済: 線形弾性エンジン → 2 済: モデル自動生成（YAML） → 3 済: 荷重自動生成（Ai分布等）
-→ 4 済: 断面算定（RC規準 2018）→ 5 済: 非線形（材端ばね・増分法）→ 6 済: 保有水平耐力 → 7: 可視化・計算書
+→ 4 済: 断面算定（RC規準 2018）→ 5 済: 非線形（材端ばね・増分法）→ 6 済: 保有水平耐力 → 7 済: 可視化・計算書（HTML）
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
