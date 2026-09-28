@@ -1,0 +1,51 @@
+# 計算例: 荷重の自動生成（フェーズ3）
+# 建物は two_story_frame.yaml と同じ。荷重は床荷重・部材自重・Ai 分布から自動生成する
+# 単位: 寸法 mm。床荷重 kN/m²、単位体積重量 kN/m³、追加重量 kN
+name: 2F-RC-auto
+
+materials:
+  Fc24: {Fc: 24}
+
+sections:
+  C1: {b: 600, D: 600}
+  G1: {b: 400, D: 700, phi_y: 1.5}
+  G2: {b: 400, D: 700, phi_y: 2.0}
+
+defaults:
+  material: Fc24
+
+grids:
+  x: {X1: 0, X2: 6000, X3: 12000}
+  y: {Y1: 0, Y2: 7000}
+
+floors:
+  1F: 0
+  2F: 4000
+  RF: 7500
+
+columns:
+  - {at: "*", section: C1}
+beams:
+  - {at: "*", section: G1}
+  - {at: "X2/Y1-Y2", section: G2}
+
+# ---- 荷重（自動生成されるケース: G 固定, P 積載, Ex, Ey 地震）
+floor_loads:              # [kN/m²] DL はスラブ自重・仕上げを含む
+  事務室: {DL: 6.0, LL_frame: 1.8, LL_seismic: 0.8}
+  屋上:   {DL: 7.0, LL_frame: 0.65, LL_seismic: 0.3}
+
+floor_use:                # 床区画の用途（後の行が優先）
+  - {area: "*", use: 事務室}
+  - {floor: RF, area: "*", use: 屋上}
+
+self_weight: {gamma: 24.0}   # 梁・柱の自重 [kN/m³]
+
+extra_weights:            # 地震用重量への加算 [kN]
+  RF: 150                 # パラペット
+
+seismic:                  # 建築基準法施行令第88条、昭55建告第1793号
+  Z: 1.0
+  soil: 2
+  C0: 0.2
+  directions: [x, y]
+  eccentricity: 0.0       # 例: 0.05 で Ex+e, Ex-e, Ey+e, Ey-e も生成

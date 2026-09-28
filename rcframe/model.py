@@ -10,7 +10,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from .element import (local_stiffness, local_axes, transformation_matrix,
-                      rigid_zone_matrix, udl_equivalent_loads)
+                      rigid_zone_matrix, udl_equivalent_loads, distributed_equivalent_loads)
 from .materials import Concrete, RectSection
 from .results import Result
 
@@ -66,7 +66,7 @@ class Model:
         self.nodes: dict[int, Node] = {}
         self.elements: dict[int, Element] = {}
         self.nodal_loads = defaultdict(list)    # case -> [(node, F6)]
-        self.member_loads = defaultdict(list)   # case -> [(elem, w_global)]
+        self.member_loads = defaultdict(list)   # case -> [(elem, w_global, profile)]
         self.diaphragms = []                    # [(master, [slaves])]
 
     # ------------------------------------------------------------ 入力
@@ -85,9 +85,18 @@ class Model:
         """節点荷重 F = (Fx, Fy, Fz, Mx, My, Mz) [N, N·mm] 全体座標"""
         self.nodal_loads[case].append((nid, np.asarray(F, float)))
 
-    def add_member_load(self, case, eid, w_global):
-        """部材等分布荷重 w = (wx, wy, wz) [N/mm] 全体座標・部材長あたり"""
-        self.member_loads[case].append((eid, np.asarray(w_global, float)))
+    def add_member_load(self, case, eid, w_global, profile=None):
+        """部材分布荷重 w = (wx, wy, wz) [N/mm] 全体座標・部材長あたり
+
+        profile=None なら全長に等分布。台形・三角形などは
+        profile=[(x, f), ...]（x: i節点からの距離 [mm] 昇順, f: 係数）で
+        区分線形の分布 w × f(x) を与える（範囲外は 0）
+        """
+        if profile is not None:
+            profile = [(float(x), float(f)) for x, f in profile]
+            if any(b[0] < a[0] for a, b in zip(profile, profile[1:])):
+                raise ValueError(f"要素 {eid}: profile の x は昇順で指定してください")
+        self.member_loads[case].append((eid, np.asarray(w_global, float), profile))
 
     def add_diaphragm(self, master, slaves):
         """剛床仮定: slaves の (ux, uy, rz) を master に従属させる
@@ -151,10 +160,19 @@ class Model:
     def _element_loads(self, case):
         """要素ごとの等価節点荷重（局所）を返す: eid -> (p_flex, p_rigid)"""
         out = {}
-        for eid, w in self.member_loads.get(case, []):
+        for eid, w, profile in self.member_loads.get(case, []):
             e = self.elements[eid]
             wl = e.R @ w
-            pf, pr = udl_equivalent_loads(wl, e.Lf, e.rigid_i, e.rigid_j)
+            if profile is None:
+                pf, pr = udl_equivalent_loads(wl, e.Lf, e.rigid_i, e.rigid_j)
+            else:
+                if profile[0][0] < -1e-6 or profile[-1][0] > e.L + 1e-6:
+                    raise ValueError(f"要素 {eid}: profile の範囲が部材長 {e.L:.1f} mm を超えています")
+                s, m = e.sec, e.mat
+                pf, pr = distributed_equivalent_loads(
+                    wl, profile, e.L, e.rigid_i, e.rigid_j, m.E * s.Iy, m.E * s.Iz,
+                    m.G * s.Asy if e.shear_deform else None,
+                    m.G * s.Asz if e.shear_deform else None)
             if eid in out:
                 out[eid] = (out[eid][0] + pf, out[eid][1] + pr)
             else:

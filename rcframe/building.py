@@ -13,10 +13,21 @@
     梁     "Y1/X1-X3"（Y1通り上 X1〜X3 間の X方向梁）, "X2/*", "*"（全スパン）
     吹抜け "X1-X2/Y1-Y2"（X範囲/Y範囲で囲まれた床区画）, "*" も可
 
-単位: mm, N
+荷重の自動生成（floor_loads 等があるとき）: G, P, Ex, Ey（, Ex±e, Ey±e）
+    計算そのものは loads.py、ここでは入力の解釈と載荷を行う
+
+単位: mm, N（例外: 荷重欄 floor_loads/self_weight/extra_weights は kN/m², kN/m³, kN）
 """
+import math
+
+from .loads import TC, seismic_story_forces, tributary_profiles
 from .materials import Concrete, RectSection
 from .model import Model
+
+# YAML の荷重欄の単位（実務の慣用単位）→ 内部単位 mm, N
+KN_M2 = 1e-3     # kN/m² → N/mm²
+KN_M3 = 1e-6     # kN/m³ → N/mm³
+KN = 1e3         # kN → N
 
 ALL = "*"
 _FORBIDDEN = ("/", "-", "*")
@@ -61,7 +72,8 @@ class Building:
     node(), column(), beam(), master(), drift_levels() を使う。
     """
     TOP_KEYS = ("name", "materials", "sections", "defaults", "grids", "floors",
-                "columns", "beams", "openings", "loads")
+                "columns", "beams", "openings", "loads",
+                "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -85,7 +97,12 @@ class Building:
             self._apply_opening(r)
 
         self._build()
-        for case, spec in (data.get("loads") or {}).items():
+        self.weights = {}          # f -> (W [N], xg, yg) 地震用重量と重心
+        self.seismic = None        # 地震力の計算表
+        if any(k in data for k in ("floor_loads", "floor_use", "self_weight",
+                                   "extra_weights", "seismic")):
+            self._generate_loads(data)
+        for case, spec in (data.get("loads") or {}).items():   # 手入力の荷重は加算
             self._apply_loads(str(case), spec)
 
     # ============================================================ 読み込み
@@ -254,18 +271,23 @@ class Building:
             else:
                 target[k] = val
 
-    def _apply_opening(self, r):
-        what = f"吹抜け {r}"
-        _check_keys(r, ("floor", "area"), what)
-        floors = self._floor_indices(r.get("floor"), range(1, len(self.floors)), what)
-        area = str(r.get("area", ""))
+    def _area_cells(self, area, what):
+        """"X範囲/Y範囲" または "*" -> 床区画 [(ix, iy)]"""
+        area = str(area)
         parts = ["*", "*"] if area == ALL else area.split("/")
         if len(parts) != 2:
             raise InputError(f"{what}: area は \"X範囲/Y範囲\" で指定してください: {area!r}")
         i0, i1 = self._range(parts[0], self.ix, what)
         j0, j1 = self._range(parts[1], self.iy, what)
+        return [(i, j) for i in range(i0, i1) for j in range(j0, j1)]
+
+    def _apply_opening(self, r):
+        what = f"吹抜け {r}"
+        _check_keys(r, ("floor", "area"), what)
+        floors = self._floor_indices(r.get("floor"), range(1, len(self.floors)), what)
+        cells = self._area_cells(r.get("area", ""), what)
         for f in floors:
-            self.openings |= {(f, i, j) for i in range(i0, i1) for j in range(j0, j1)}
+            self.openings |= {(f, i, j) for i, j in cells}
 
     # ============================================================ モデル生成
     def _build(self):
@@ -377,6 +399,179 @@ class Building:
                 raise InputError(f"{f_what}: 階 {fname} には剛床（マスター節点）がありません")
             fx, fy, mz = _vec(F, 3, f_what + "（[Fx, Fy, Mz]）")
             m.add_nodal_load(case, self.masters[self.fi[fname]], [fx, fy, 0, 0, 0, mz])
+
+    # ============================================================ 荷重の自動生成
+    def _cell_name(self, f, i, j):
+        return (f"{self.floors[f][0]} 区画 {self.gx[i][0]}-{self.gx[i + 1][0]}/"
+                f"{self.gy[j][0]}-{self.gy[j + 1][0]}")
+
+    def _generate_loads(self, data):
+        """床荷重の梁への分配（G, P）、部材自重（G）、地震用重量、Ai 分布の地震力"""
+        m = self.model
+        nf = len(self.floors)
+        upper = range(1, nf)
+
+        # ---- 入力（YAML の単位 kN/m², kN/m³, kN を N, mm に換算）
+        self.floor_loads = {}
+        for name, d in (data.get("floor_loads") or {}).items():
+            what = f"床荷重 {name}"
+            _check_keys(d, ("DL", "LL_frame", "LL_seismic"), what)
+            if "DL" not in d:
+                raise InputError(f"{what}: DL がありません")
+            self.floor_loads[str(name)] = {k: _num(d.get(k, 0), f"{what}.{k}") * KN_M2
+                                           for k in ("DL", "LL_frame", "LL_seismic")}
+        self.cell_use = {}                  # (f, ix, iy) -> 用途名
+        for r in data.get("floor_use") or []:
+            what = f"床用途 {r}"
+            _check_keys(r, ("floor", "area", "use"), what)
+            if "use" not in r:
+                raise InputError(f"{what}: use がありません（床荷重なしは none）")
+            use = None if r["use"] in _NONE else str(r["use"])
+            if use is not None and use not in self.floor_loads:
+                raise InputError(f"{what}: floor_loads に未定義の用途 {use!r}")
+            for f in self._floor_indices(r.get("floor"), upper, what):
+                for i, j in self._area_cells(r.get("area", ALL), what):
+                    if use is None:
+                        self.cell_use.pop((f, i, j), None)
+                    else:
+                        self.cell_use[(f, i, j)] = use
+        sw = data.get("self_weight") or {}
+        _check_keys(sw, ("gamma",), "self_weight")
+        gamma = _num(sw.get("gamma", 24.0), "self_weight.gamma") * KN_M3
+        extra = {}
+        for name, w in (data.get("extra_weights") or {}).items():
+            what = f"extra_weights.{name}"
+            f = self._floor_indices(str(name), upper, what)[0]
+            if f not in self.masters:
+                raise InputError(f"{what}: 階 {name} には剛床（マスター節点）がありません")
+            extra[f] = _num(w, what) * KN
+
+        # ---- 地震用重量の集計: f -> [ΣW, ΣW·x, ΣW·y]
+        acc = {f: [0.0, 0.0, 0.0] for f in upper}
+
+        def add_weight(f, w, x, y):
+            if f in acc:
+                acc[f][0] += w
+                acc[f][1] += w * x
+                acc[f][2] += w * y
+
+        # ---- 床荷重: 亀甲分割で梁へ（G: DL, P: LL_frame）
+        for (f, i, j), use in sorted(self.cell_use.items()):
+            if (f, i, j) in self.openings:
+                continue
+            (x0, x1), (y0, y1) = (self.gx[i][1], self.gx[i + 1][1]), (self.gy[j][1], self.gy[j + 1][1])
+            keys = {"x0": ("x", f, j, i), "x1": ("x", f, j + 1, i),
+                    "y0": ("y", f, i, j), "y1": ("y", f, i + 1, j)}
+            edges = {e for e, k in keys.items() if k in self.elem_ids}
+            try:
+                prof = tributary_profiles(x1 - x0, y1 - y0, edges)
+            except ValueError as ex:
+                raise InputError(f"{self._cell_name(f, i, j)}: {ex}") from None
+            fl = self.floor_loads[use]
+            for case, w in (("G", fl["DL"]), ("P", fl["LL_frame"])):
+                if w:
+                    for e, pr in prof.items():
+                        m.add_member_load(case, self.elem_ids[keys[e]], [0, 0, -w], pr)
+            add_weight(f, (fl["DL"] + fl["LL_seismic"]) * (x1 - x0) * (y1 - y0),
+                       (x0 + x1) / 2, (y0 + y1) / 2)
+
+        # ---- 部材自重（G）: 梁はその階、柱は上下の階に半分ずつ（基礎側は除く）
+        for key, eid in self.elem_ids.items():
+            e = m.elements[eid]
+            ni, nj = m.nodes[e.ni], m.nodes[e.nj]
+            q = gamma * e.sec.A
+            if not q:
+                continue
+            m.add_member_load("G", eid, [0, 0, -q])
+            L = math.dist(ni.xyz, nj.xyz)
+            if key[0] == "c":
+                add_weight(key[1], q * L / 2, ni.x, ni.y)
+                add_weight(key[1] + 1, q * L / 2, ni.x, ni.y)
+            else:
+                add_weight(key[1], q * L, (ni.x + nj.x) / 2, (ni.y + nj.y) / 2)
+
+        # ---- 追加重量（床の図心＝マスター節点位置）
+        for f, w in extra.items():
+            nd = m.nodes[self.masters[f]]
+            add_weight(f, w, nd.x, nd.y)
+
+        self.weights = {f: (W, Wx / W, Wy / W) for f, (W, Wx, Wy) in acc.items() if W > 0}
+
+        if data.get("seismic") is not None:
+            self._seismic_loads(data["seismic"])
+
+    def _seismic_loads(self, sd):
+        """Ai 分布の地震力を各階の重心に作用させる（マスター節点へ Fx, Fy, Mz として載荷）"""
+        _check_keys(sd, ("Z", "soil", "C0", "T", "directions", "eccentricity"), "seismic")
+        Z = _num(sd.get("Z", 1.0), "seismic.Z")
+        C0 = _num(sd.get("C0", 0.2), "seismic.C0")
+        soil = sd.get("soil", 2)
+        if soil not in TC:
+            raise InputError(f"seismic.soil: 地盤種別は 1, 2, 3 のいずれかです: {soil!r}")
+        T = None if sd.get("T") is None else _num(sd["T"], "seismic.T")
+        dirs = [str(d) for d in _as_list(sd.get("directions", ["x", "y"]))]
+        if not dirs or any(d not in ("x", "y") for d in dirs):
+            raise InputError(f"seismic.directions: x, y から指定してください: {dirs!r}")
+        ecc = _num(sd.get("eccentricity", 0.0), "seismic.eccentricity")
+
+        nf = len(self.floors)
+        for f in range(1, nf):
+            name = self.floors[f][0]
+            if f not in self.masters:
+                raise InputError(f"seismic: 階 {name} に剛床がないため Ai 分布の地震力を作用させられません")
+            if f not in self.weights:
+                raise InputError(f"seismic: 階 {name} の地震用重量が 0 です")
+        W = [self.weights[f][0] for f in range(1, nf)]
+        h_m = (self.floors[-1][1] - self.floors[0][1]) / 1000
+        T, Rt, rows = seismic_story_forces(W, h_m, Z, soil, C0, T)
+
+        m = self.model
+        for k, row in enumerate(rows):
+            f = k + 1
+            row.update(story=self.floors[k][0], floor=self.floors[f][0], W=W[k],
+                       xg=self.weights[f][1], yg=self.weights[f][2])
+        self.seismic = {"Z": Z, "soil": soil, "Tc": TC[soil], "C0": C0, "T": T, "Rt": Rt,
+                        "h": h_m, "eccentricity": ecc, "rows": rows}
+
+        variants = [("", 0)] + ([("+e", 1), ("-e", -1)] if ecc else [])
+        for d in dirs:
+            for tag, sgn in variants:
+                case = f"E{d}{tag}"
+                for k, row in enumerate(rows):
+                    f = k + 1
+                    mst = m.nodes[self.masters[f]]
+                    bx, by = self._floor_extent(f)
+                    if d == "x":
+                        yg = row["yg"] + sgn * ecc * by
+                        F = [row["P"], 0, 0, 0, 0, -(yg - mst.y) * row["P"]]
+                    else:
+                        xg = row["xg"] + sgn * ecc * bx
+                        F = [0, row["P"], 0, 0, 0, (xg - mst.x) * row["P"]]
+                    m.add_nodal_load(case, self.masters[f], F)
+
+    def _floor_extent(self, f):
+        """床区画（吹抜けを除く）の X, Y 方向の外形寸法（偶発偏心の基準）"""
+        cells = [(i, j) for i in range(len(self.gx) - 1) for j in range(len(self.gy) - 1)
+                 if (f, i, j) not in self.openings]
+        xs = [self.gx[i][1] for i, _ in cells] + [self.gx[i + 1][1] for i, _ in cells]
+        ys = [self.gy[j][1] for _, j in cells] + [self.gy[j + 1][1] for _, j in cells]
+        return max(xs) - min(xs), max(ys) - min(ys)
+
+    def print_seismic_table(self):
+        """地震用重量と Ai 分布の計算表（kN）"""
+        s = self.seismic
+        if s is None:
+            print("地震力は生成されていません（seismic 未指定）")
+            return
+        print(f"\n■ 地震力（Ai 分布）  Z={s['Z']}  地盤種別 {s['soil']} (Tc={s['Tc']} s)  "
+              f"h={s['h']:.2f} m  T={s['T']:.3f} s  Rt={s['Rt']:.3f}  C0={s['C0']}")
+        print(f"{'層':>4} {'Wi':>9} {'ΣWi':>9} {'αi':>7} {'Ai':>7} {'Ci':>7} {'Qi':>9} "
+              f"{'Pi':>9} {'重心 xg':>9} {'yg':>9}")
+        for r in reversed(s["rows"]):
+            print(f"{r['story']:>4} {r['W'] / KN:9.1f} {r['sumW'] / KN:9.1f} {r['alpha']:7.3f} "
+                  f"{r['Ai']:7.3f} {r['Ci']:7.3f} {r['Q'] / KN:9.1f} {r['P'] / KN:9.1f} "
+                  f"{r['xg']:9.0f} {r['yg']:9.0f}")
+        print("  Wi・重心: 層の上の床の値、Pi: 上の床に作用する外力 [kN, mm]")
 
     # ============================================================ 検索
     def _f(self, floor):

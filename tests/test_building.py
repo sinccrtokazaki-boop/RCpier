@@ -208,7 +208,7 @@ def test_beam_load_selection():
     d = _data()
     d["loads"] = {"G": {"beams": [{"floor": "RF", "at": "Y1/*", "w": [0, 0, -20]}]}}
     b = Building(d)
-    loaded = [eid for eid, _ in b.model.member_loads["G"]]
+    loaded = [eid for eid, *_ in b.model.member_loads["G"]]
     assert sorted(loaded) == sorted([b.beam("Y1", "X1", "X2", "RF"), b.beam("Y1", "X2", "X3", "RF")])
     r = b.model.analyze("G")
     assert sum(r.reactions.values())[2] == pytest.approx(20 * 12000, rel=1e-8)
