@@ -4,7 +4,7 @@
 """
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from rcframe import load_model
+from rcframe import load_model, run_pier_checks
 
 path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("pier_example.yaml")
 pier = load_model(path)
@@ -42,6 +42,13 @@ if pier.combinations:
             Ms.append(max(abs(sj[4]), abs(sj[5])))
         print(f"{name:<12} {pier.combinations[name]['state']:<4} {d[0]:7.2f} {d[1]:7.2f} "
               f"{-min(Ns) / 1e3:15.1f} {max(max(Ns), 0) / 1e3:11.1f} {max(Ms) / 1e6:18.1f}")
+
+if pier.combinations and pier.checks["given"]:
+    rep = run_pier_checks(pier, res)
+    print("\n=== 照査項目ごとの最大照査値 ===")
+    for (item,), r in sorted(rep.governing(("item",)).items()):
+        print(f"{item:<10} {r.label:<14} {r.pos:<4} {r.combo:<12} {r.ratio:5.2f}  {'OK' if r.ok else 'NG'}  {r.note}")
+    print(f"最大照査値 {rep.max_ratio:.2f}、NG {len(rep.ng)} 箇所（全部材は rep.print_summary()）")
 
 for case in ("H", "W"):
     if case not in res:

@@ -8,7 +8,17 @@ materials:
   SKK490: {steel: true, fy: 315}    # 鋼管杭（E = 2.0×10⁵ N/mm²）
 
 sections:
-  G1: {b: 1200, D: 1500, material: C24}          # 上部工の梁
+  G1:                                            # 上部工の梁
+    b: 1200
+    D: 1500
+    material: C24
+    cover: 70                                    # かぶり（主鉄筋の表面まで）[mm]
+    rebar:                                       # 配筋（建物編と同じ書き方）
+      main: SD345
+      shear: SD345
+      dt: 100
+      end:    {top: 10-D32, bottom: 6-D29, stirrup: 4-D16@200}
+      center: {top: 6-D29, bottom: 10-D32, stirrup: 4-D16@250}
   P1:                                            # 鋼管杭 φ1000 × t14
     pipe: {D: 1000, t: 14}
     material: SKK490
@@ -33,10 +43,10 @@ beams:
 
 piles:
   section: P1                       # 全交点に配置
-  rows:                             # 列ごとの海底面（D.L.）と水平地盤反力係数
-    L: {seabed: -4.0, kh: 20000}
-    M: {seabed: -8.0, kh: 20000}
-    S: {seabed: -12.0, kh: 15000}
+  rows:                             # 列ごとの海底面（D.L.）、水平地盤反力係数、設計支持力（押込み・引抜き）[kN]
+    L: {seabed: -4.0, kh: 20000, Rcd: 5000, Rtd: 2000}
+    M: {seabed: -8.0, kh: 20000, Rcd: 6000, Rtd: 2500}
+    S: {seabed: -12.0, kh: 15000, Rcd: 7000, Rtd: 3000}
   # overrides:
   #   - {at: "B1/S", section: none} # 杭なしの例
 
@@ -63,6 +73,15 @@ combinations:
   L1地震_-X:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQx: -1.0}}
   L1地震_+Y:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQy: 1.0}}
   L1地震_-Y:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQy: -1.0}}
+
+# 照査の係数（見本の値。示方書 2022・港湾基準 2018 で要確認）
+checks:
+  gamma_i: 1.0                      # 構造物係数
+  concrete: {gamma_c: 1.3, gamma_s: 1.0, gamma_b_flexure: 1.1, gamma_b_vc: 1.3, gamma_b_vs: 1.1,
+             gamma_b_vw: 1.3}
+  crack: {combinations: [永続_常時], wa_ratio: 0.0035, eps_csd: 150.0e-6}   # wa = 0.0035c
+  pile: {gamma_m: 1.0}              # 鋼管の材料係数
+  strength_combinations: all        # 断面破壊の照査: 永続・変動の全組合せ
 
 loads:                              # 手入力の荷重（P1 の確認用。actions と同名なら加算）
   H:                                # 上部工の図心に法線直角方向の水平力

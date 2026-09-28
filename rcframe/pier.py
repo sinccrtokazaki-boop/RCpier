@@ -15,8 +15,9 @@ YAML の単位（港湾の実務に合わせる）: 高さ・通り芯 m（D.L. 
 import math
 
 from .grid import ALL, _NONE, GridMixin, InputError, _as_list, _check_keys, _num, _vec
+from .building import parse_rebar
 from .loads import tributary_profiles
-from .materials import RectSection
+from .materials import STEELS, RectSection
 from .model import Model
 from .port_loads import WeightSum, mooring_force, point_to_nodes
 from .results import Result
@@ -38,7 +39,7 @@ class Pier(GridMixin):
     杭ごとの仮想固定点などは self.piles[(ix, iy)]（dict）に入る。
     """
     TOP_KEYS = ("type", "name", "materials", "sections", "grids", "deck", "beams", "piles",
-                "loads", "report", "unit_weight", "actions", "combinations")
+                "loads", "report", "unit_weight", "actions", "combinations", "checks")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -73,6 +74,7 @@ class Pier(GridMixin):
         for case, spec in (data.get("loads") or {}).items():   # 手入力の荷重は加算
             self._apply_loads(str(case), spec)
         self._read_combinations(data.get("combinations") or {})
+        self._read_checks(data.get("checks") or {})
 
     # ============================================================ 読み込み
     def _read_materials(self, mats):
@@ -115,12 +117,18 @@ class Pier(GridMixin):
                         raise
                     raise InputError(f"{what}: {ex}") from None
             else:
-                _check_keys(d, ("b", "D", "phi_y", "phi_z", "kappa", "material"), what)
+                _check_keys(d, ("b", "D", "phi_y", "phi_z", "kappa", "material", "rebar", "cover"), what)
                 for k in ("b", "D"):
                     if k not in d:
                         raise InputError(f"{what}: {k} がありません（鋼管は pipe: {{D, t}}）")
-                kw = {k: _num(v, f"{what}.{k}") for k, v in d.items() if k != "material"}
+                kw = {k: _num(v, f"{what}.{k}") for k, v in d.items()
+                      if k not in ("material", "rebar", "cover")}
                 sec = RectSection(str(name), **kw)
+                if d.get("rebar") is not None:
+                    sec.rebar = parse_rebar(d["rebar"], STEELS, f"{what} の配筋")
+                    if not hasattr(sec.rebar, "end"):
+                        raise InputError(f"{what}: 上部工の梁の配筋は end / center で指定してください")
+                sec.cover = _num(d["cover"], f"{what}.cover") if "cover" in d else None   # かぶり [mm]
             m = d.get("material")
             if m is None or str(m) not in self.materials:
                 raise InputError(f"{what}: 材料 {m!r} が未定義です")
@@ -174,14 +182,18 @@ class Pier(GridMixin):
         if p is None or "rows" not in p:
             raise InputError("piles: rows（杭の列ごとの海底面と kh）がありません")
         rows = {}
+        self.pile_capacity = {}                       # 列 -> (Rcd, Rtd) [N]
         for name, d in p["rows"].items():
             what = f"piles.rows.{name}"
             name = str(name)
             if name not in self.iy:
                 raise InputError(f"{what}: 未定義の Y通り（杭の列）です")
-            _check_keys(d, ("seabed", "kh"), what)
+            _check_keys(d, ("seabed", "kh", "Rcd", "Rtd"), what)
             if "seabed" not in d or "kh" not in d:
                 raise InputError(f"{what}: seabed と kh を指定してください")
+            if "Rcd" in d or "Rtd" in d:              # 設計支持力（押込み・引抜き）[kN]（入力値）
+                self.pile_capacity[self.iy[name]] = tuple(
+                    _num(d[k], f"{what}.{k}") * KN if k in d else None for k in ("Rcd", "Rtd"))
             kh = _num(d["kh"], f"{what}.kh")
             if kh <= 0:
                 raise InputError(f"{what}: kh は正の値です")
@@ -424,6 +436,40 @@ class Pier(GridMixin):
                     raise InputError(f"{what}: 荷重ケース {c!r} がありません（{', '.join(sorted(cases))}）")
                 out[str(c)] = _num(f, f"{what}.{c}")
             self.combinations[str(name)] = {"state": st, "factors": out}
+
+    def _read_checks(self, c):
+        """照査の係数（既定値は示方書で広く用いられる値の見本。規準で要確認）"""
+        _check_keys(c, ("gamma_i", "concrete", "crack", "pile", "strength_combinations"), "checks")
+        cc = c.get("concrete") or {}
+        ckeys = ("gamma_c", "gamma_s", "gamma_b_flexure", "gamma_b_vc", "gamma_b_vs", "gamma_b_vw")
+        _check_keys(cc, ckeys, "checks.concrete")
+        cdef = dict(gamma_c=1.3, gamma_s=1.0, gamma_b_flexure=1.1, gamma_b_vc=1.3, gamma_b_vs=1.1,
+                    gamma_b_vw=1.3)
+        cr = c.get("crack") or {}
+        _check_keys(cr, ("combinations", "wa_ratio", "eps_csd"), "checks.crack")
+        default_crack = [n for n, v in self.combinations.items() if v["state"] == "永続"]
+        crc = [str(x) for x in _as_list(cr.get("combinations", default_crack))]
+        for x in crc:
+            if x not in self.combinations:
+                raise InputError(f"checks.crack.combinations: 組合せ {x!r} がありません")
+        pl = c.get("pile") or {}
+        _check_keys(pl, ("gamma_m",), "checks.pile")
+        sc = c.get("strength_combinations", "all")
+        if sc != "all":
+            sc = [str(x) for x in _as_list(sc)]
+            for x in sc:
+                if x not in self.combinations:
+                    raise InputError(f"checks.strength_combinations: 組合せ {x!r} がありません")
+        self.checks = {
+            "given": bool(c),
+            "gamma_i": _num(c.get("gamma_i", 1.0), "checks.gamma_i"),
+            "concrete": {k: _num(cc.get(k, cdef[k]), f"checks.concrete.{k}") for k in ckeys},
+            "crack": {"combinations": crc,
+                      "wa_ratio": _num(cr.get("wa_ratio", 0.0035), "checks.crack.wa_ratio"),
+                      "eps_csd": _num(cr.get("eps_csd", 150e-6), "checks.crack.eps_csd")},
+            "pile": {"gamma_m": _num(pl.get("gamma_m", 1.0), "checks.pile.gamma_m")},
+            "strength_combinations": sc,
+        }
 
     @property
     def cases(self):

@@ -33,6 +33,9 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - `rcframe/pier.py`      : 桟橋（直杭式横桟橋）のモデル生成（Pier）。load_model は type: pier で Pier を返す
   - 荷重の生成（actions: D, L, Ls, B, T, EQ）と組合せ（combinations、部分係数は入力）
 - `rcframe/port_loads.py`: 桟橋の荷重の計算（てこの原理の配分、偏心モーメント、牽引力の成分、重量の集計）
+- `rcframe/port_check.py`: 桟橋の照査（示方書 2022 の Mud・Vyd・Vwcd・ひび割れ幅、鋼管杭、支持力）。
+  照合が必要な事項は VERIFY_ITEMS
+- 配筋の読み込みは building.parse_rebar（建物・桟橋で共通）
 - `rcframe/report.py`    : 計算書 HTML（1ファイル完結、外部参照禁止）。計算は既存関数を呼ぶだけで整形のみ
   - 規準書で照合が必要な事項は VERIFY_ITEMS、既知の簡略化は KNOWN_SIMPLIFICATIONS（README と揃える）
 
@@ -60,7 +63,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 
 ## 桟橋編のロードマップ（README.md 参照）
 基準: 港湾基準（2018）、コンクリート標準示方書（2022）。部分係数はプログラムに組み込まず YAML で入力する
-P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P3: 照査 → P4: レベル2（プッシュオーバー）→ P5: 計算書
+P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P3 済: 照査 → P4: レベル2（プッシュオーバー）→ P5: 計算書
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用

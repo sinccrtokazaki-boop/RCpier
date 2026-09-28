@@ -32,6 +32,42 @@ KN_M2 = 1e-3     # kN/m² → N/mm²
 KN_M3 = 1e-6     # kN/m³ → N/mm³
 KN = 1e3         # kN → N
 
+def parse_rebar(r, steels, what):
+    """梁（end/center）または柱（x/y/hoop_x/hoop_y）の配筋  steels: {鋼種名: SteelGrade}"""
+    is_beam = "end" in r or "center" in r
+    keys = ("main", "shear", "dt") + (("end", "center") if is_beam
+                                      else ("x", "y", "hoop_x", "hoop_y"))
+    _check_keys(r, keys, what)
+    missing = [k for k in keys if k not in r]
+    if missing:
+        raise InputError(f"{what}: {missing} がありません")
+    steel = {}
+    for k in ("main", "shear"):
+        if str(r[k]) not in steels:
+            raise InputError(f"{what}: 未定義の鋼種 {r[k]!r}")
+        steel[k] = steels[str(r[k])]
+    dt = _num(r["dt"], f"{what}.dt")
+    try:
+        if is_beam:
+            pos = {}
+            for p in ("end", "center"):
+                _check_keys(r[p], ("top", "bottom", "stirrup"), f"{what}.{p}")
+                if set(r[p]) != {"top", "bottom", "stirrup"}:
+                    raise InputError(f"{what}.{p}: top, bottom, stirrup をすべて指定してください")
+                pos[p] = BeamBars(Bars.parse(r[p]["top"]), Bars.parse(r[p]["bottom"]),
+                                  Hoop.parse(r[p]["stirrup"]))
+            return BeamRebar(steel["main"], steel["shear"], dt, pos["end"], pos["center"])
+        x, y = Bars.parse(r["x"]), Bars.parse(r["y"])
+        if x.n < 2 or y.n < 2:
+            raise InputError(f"{what}: 1面の本数は隅筋を含めて 2 本以上です")
+        return ColumnRebar(steel["main"], steel["shear"], dt, x, y,
+                           Hoop.parse(r["hoop_x"]), Hoop.parse(r["hoop_y"]))
+    except ValueError as ex:
+        if isinstance(ex, InputError):
+            raise
+        raise InputError(f"{what}: {ex}") from None
+
+
 class Building(GridMixin):
     """通り芯・階・配置ルールから Model を生成する
 
@@ -123,39 +159,7 @@ class Building(GridMixin):
             self.section_material[str(name)] = d.get("material")
 
     def _read_rebar(self, r, what):
-        """梁（end/center）または柱（x/y/hoop_x/hoop_y）の配筋"""
-        is_beam = "end" in r or "center" in r
-        keys = ("main", "shear", "dt") + (("end", "center") if is_beam
-                                          else ("x", "y", "hoop_x", "hoop_y"))
-        _check_keys(r, keys, what)
-        missing = [k for k in keys if k not in r]
-        if missing:
-            raise InputError(f"{what}: {missing} がありません")
-        steel = {}
-        for k in ("main", "shear"):
-            if str(r[k]) not in self.steels:
-                raise InputError(f"{what}: 未定義の鋼種 {r[k]!r}")
-            steel[k] = self.steels[str(r[k])]
-        dt = _num(r["dt"], f"{what}.dt")
-        try:
-            if is_beam:
-                pos = {}
-                for p in ("end", "center"):
-                    _check_keys(r[p], ("top", "bottom", "stirrup"), f"{what}.{p}")
-                    if set(r[p]) != {"top", "bottom", "stirrup"}:
-                        raise InputError(f"{what}.{p}: top, bottom, stirrup をすべて指定してください")
-                    pos[p] = BeamBars(Bars.parse(r[p]["top"]), Bars.parse(r[p]["bottom"]),
-                                      Hoop.parse(r[p]["stirrup"]))
-                return BeamRebar(steel["main"], steel["shear"], dt, pos["end"], pos["center"])
-            x, y = Bars.parse(r["x"]), Bars.parse(r["y"])
-            if x.n < 2 or y.n < 2:
-                raise InputError(f"{what}: 1面の本数は隅筋を含めて 2 本以上です")
-            return ColumnRebar(steel["main"], steel["shear"], dt, x, y,
-                               Hoop.parse(r["hoop_x"]), Hoop.parse(r["hoop_y"]))
-        except ValueError as ex:
-            if isinstance(ex, InputError):
-                raise
-            raise InputError(f"{what}: {ex}") from None
+        return parse_rebar(r, self.steels, what)
 
     def _read_design(self, d):
         _check_keys(d, ("shear_factor", "young_ratio", "long", "seismic"), "design")

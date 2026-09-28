@@ -276,7 +276,7 @@ write_report(load_building("input.yaml"), "report.html")
 |---|---|---|
 | P1 | 桟橋モデルの自動生成（上部工の梁、鋼管杭、仮想固定点）と線形解析 | 済 |
 | P2 | 荷重（自重・上載荷重・接岸力・牽引力・レベル1地震動）と部分係数による組合せ | 済 |
-| P3 | 照査（上部工 RC、鋼管杭、杭の支持力） | 予定 |
+| P3 | 照査（上部工 RC、鋼管杭、杭の支持力） | 済 |
 | P4 | レベル2地震動（プッシュオーバー） | 予定 |
 | P5 | 計算書（HTML） | 予定 |
 
@@ -324,6 +324,36 @@ res = pier.analyze_cases()                 # {ケース: Result}
 comb = pier.analyze_combinations(res)      # {組合せ名: Result}
 pier.weights, pier.seismic                 # 重量と重心、地震用重量
 ```
+
+**照査（P3）**: `run_pier_checks(pier)` → `rep.print_summary()`, `rep.ng`, `rep.max_ratio`
+
+```yaml
+sections:
+  G1: {b: 1200, D: 1500, material: C24, cover: 70,       # かぶり（主鉄筋の表面まで）[mm]
+       rebar: {main: SD345, shear: SD345, dt: 100,
+               end: {top: 10-D32, bottom: 6-D29, stirrup: 4-D16@200},
+               center: {top: 6-D29, bottom: 10-D32, stirrup: 4-D16@250}}}
+piles:
+  rows: {L: {seabed: -4.0, kh: 20000, Rcd: 5000, Rtd: 2000}}   # 設計支持力（押込み・引抜き）[kN]
+checks:                     # 係数は見本（既定値も同じ）。示方書・港湾基準で要確認
+  gamma_i: 1.0
+  concrete: {gamma_c: 1.3, gamma_s: 1.0, gamma_b_flexure: 1.1, gamma_b_vc: 1.3, gamma_b_vs: 1.1, gamma_b_vw: 1.3}
+  crack: {combinations: [永続_常時], wa_ratio: 0.0035, eps_csd: 150.0e-6}
+  pile: {gamma_m: 1.0}
+  strength_combinations: all          # 断面破壊の照査（all = 永続・変動の全組合せ）
+```
+
+| 対象 | 照査 | 式 |
+|---|---|---|
+| 上部工の梁（杭の前面・中央） | 断面破壊（曲げ）γi·Md/Mud | 等価応力ブロック（k1 = 0.85, β = 0.8, ε'cu = 0.0035）とひずみの適合条件、Mud = Mu/γb |
+| | 断面破壊（せん断）γi·Vd/Vyd、γi·Vd/Vwcd | Vcd = βd·βp·fvcd·bw·d/γb、Vsd = Aw·fwyd·(d/1.15)/(s·γb)、Vwcd = 1.25√f'cd·bw·d/γb |
+| | 使用性 w/wa | w = 1.1·k1·k2·k3·{4c + 0.7(cs − φ)}·(σse/Es + ε'csd)、σse はひび割れ断面の弾性計算、wa = 係数 × c |
+| 鋼管杭（杭頭・仮想固定点、腐食後の断面） | 軸力と曲げ | γi·(N/(A·fyd) + M/(Z·fyd))、M は 2方向の合成 |
+| | せん断 | γi·(2Q/A)/(fyd/√3) |
+| 杭の支持力 | 押込み・引抜き | γi·N/Rcd、γi·N/Rtd（Rcd, Rtd は入力値） |
+
+組合せの荷重係数は combinations で考慮済みとし、照査では構造物係数 γi を乗じる（構造解析係数 γa = 1.0）。
+式の形・係数のうち照合が必要な事項は `rcframe/port_check.py` の `VERIFY_ITEMS` に列挙。
 
 **P2 の簡略化**: 張出し部の荷重は端の梁への線荷重（ねじりは無視）。防舷材・係船柱の力は海側の梁の両端節点へ
 てこの原理で配分（梁の局所的な曲げの影響は無視）。杭の慣性力・付加質量、車両・荷役機械の集中荷重の自動生成は
