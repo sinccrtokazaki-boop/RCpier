@@ -3,7 +3,9 @@ from .materials import Concrete, RectSection, SteelGrade, STEELS, Bars, Hoop, Be
 from .model import Model, Node, Element
 from .results import Result
 from .building import Building, InputError
-from .io_yaml import load_building, building_from_yaml
+from .io_yaml import load_building, building_from_yaml, load_model, model_from_yaml
+from .pier import Pier
+from .steel import JsceConcrete, PipeSection, Steel
 from .check import run_checks, CheckReport, CheckRow
 from .pushover import run_pushover, pushover, PushoverResult
 from .capacity import run_ultimate, UltimateReport

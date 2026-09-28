@@ -268,6 +268,52 @@ write_report(load_building("input.yaml"), "report.html")
 部材荷重を Python から与える場合は `Model.add_member_load(case, eid, w, profile=[(x, 係数), ...])`
 で区分線形の分布を指定できます（x は i節点からの距離 [mm]）。
 
+## 桟橋編（直杭式横桟橋・鋼管杭）
+港湾の桟橋の RC フレーム解析。建物編と同じ解析エンジンを使い、入力と荷重・照査を桟橋用にする。
+基準: 港湾の施設の技術上の基準・同解説（2018年版）、コンクリート標準示方書（2022年版）。
+
+| 段階 | 内容 | 状態 |
+|---|---|---|
+| P1 | 桟橋モデルの自動生成（上部工の梁、鋼管杭、仮想固定点）と線形解析 | 済 |
+| P2 | 荷重（自重・上載荷重・接岸力・牽引力・レベル1地震動）と部分係数による組合せ | 予定 |
+| P3 | 照査（上部工 RC、鋼管杭、杭の支持力） | 予定 |
+| P4 | レベル2地震動（プッシュオーバー） | 予定 |
+| P5 | 計算書（HTML） | 予定 |
+
+```
+python examples/pier_example.py examples/pier_example.yaml
+```
+```python
+from rcframe import load_model
+pier = load_model("examples/pier_example.yaml")   # type: pier なら Pier、それ以外は Building
+r = pier.model.analyze("H")
+pier.pile_info("B1", "L")      # β, 仮想固定点, 杭長, 自由長
+pier.pile("B1", "L"); pier.beam("L", "B1", "B2"); pier.node("B1", "L"); pier.master()
+```
+
+例: [examples/pier_example.yaml](examples/pier_example.yaml)。**単位は建物編と異なる**:
+高さ・通り芯 m（D.L. 基準）、断面寸法 mm、荷重 kN・kN/m・kN·m、kh kN/m³（内部は mm, N）。
+
+| 項目 | 書式 | 内容 |
+|---|---|---|
+| `type` | `pier` | 桟橋の入力であることを示す |
+| `materials` | `{名前: {fck, E, nu, gamma}}` / `{名前: {steel: true, fy, E, nu}}` | 上部工コンクリート（Ec は示方書の表から補間）/ 鋼材 |
+| `sections` | `{名前: {b, D, material}}` / `{名前: {pipe: {D, t}, material, corrosion: {outer, inner}, stiffness}}` | 上部工の梁 / 鋼管杭（腐食代 mm、解析の剛性 intact / corroded） |
+| `grids` | `{x: {名前: 位置 m}, y: {…}}` | x = 法線方向の杭位置、y = 陸側 → 海側の杭の列 |
+| `deck` | `{top, model_level, soffit}` | 上部工の天端・骨組の高さ（梁の中心）・下面 [m] |
+| `beams` | `[{at, section}]` | 縦梁・横梁の配置ルール（建物編と同じ位置指定） |
+| `piles` | `{section, rows: {列: {seabed, kh}}, overrides: [{at, section}]}` | 杭の断面、列ごとの海底面 [m] と kh [kN/m³]、個別の上書き（none で杭なし） |
+| `loads` | `{ケース: {deck: [Fx, Fy, Mz], beams: [{at, w}], nodes: [{at, F}]}}` | 手入力の荷重（上部工の図心・梁の等分布・節点） |
+
+**モデル化**
+- 上部工: 縦梁・横梁の格子を model_level に配置し、上部工全体を 1つの剛床（マスター節点は平面の図心）
+- 鋼管杭: 杭頭から仮想固定点までを 1本の部材とし、仮想固定点で固定。杭頭は上部工に剛結し、
+  model_level から soffit までを剛域とする
+- 仮想固定点 = 海底面 − 1/β、β = (kh·D / 4EI)^(1/4)（Chang の方法）。EI は解析の剛性に用いる断面
+- 鋼管: A = π(D² − d²)/4、I = π(D⁴ − d⁴)/64、J = 2I、せん断の有効断面積 A/2。
+  解析の剛性は腐食前（既定）、照査（P3）は腐食後の断面を用いる
+- 上部工の梁の端部に剛域は設けない
+
 ## 規約
 - 単位: mm, N（表示は kN, kN·m）。例外として YAML の荷重欄（floor_loads 等）は kN/m²・kN/m³・kN
 - 全体座標: Z 軸が鉛直上向き

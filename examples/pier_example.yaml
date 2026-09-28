@@ -1,0 +1,44 @@
+# 計算例: 直杭式横桟橋（鋼管杭 8本 × 3列、1ブロック）
+# 単位: 高さ・通り芯 m（D.L. 基準）、断面寸法 mm、荷重 kN・kN/m・kN·m、kh kN/m³
+type: pier
+name: 桟橋計算例
+
+materials:
+  C24: {fck: 24}                    # 上部工コンクリート（Ec は示方書の表から補間）
+  SKK490: {steel: true, fy: 315}    # 鋼管杭（E = 2.0×10⁵ N/mm²）
+
+sections:
+  G1: {b: 1200, D: 1500, material: C24}          # 上部工の梁
+  P1:                                            # 鋼管杭 φ1000 × t14
+    pipe: {D: 1000, t: 14}
+    material: SKK490
+    corrosion: {outer: 2.0, inner: 0.0}          # 腐食代 [mm]（照査で使用）
+    stiffness: intact                            # 解析の剛性は腐食前の断面
+
+grids:
+  x: {B1: 0, B2: 6, B3: 12, B4: 18, B5: 24, B6: 30, B7: 36, B8: 42}   # 法線方向の杭位置
+  y: {L: 0, M: 7, S: 14}                         # 陸側 → 海側
+
+deck:
+  top: 3.0                          # 上部工の天端
+  model_level: 2.25                 # 骨組の節点の高さ（梁の中心）
+  soffit: 1.5                       # 上部工の下面（杭頭の剛域の下端）
+
+beams:
+  - {at: "*", section: G1}          # 縦梁・横梁（建物編と同じ配置ルール）
+
+piles:
+  section: P1                       # 全交点に配置
+  rows:                             # 列ごとの海底面（D.L.）と水平地盤反力係数
+    L: {seabed: -4.0, kh: 20000}
+    M: {seabed: -8.0, kh: 20000}
+    S: {seabed: -12.0, kh: 15000}
+  # overrides:
+  #   - {at: "B1/S", section: none} # 杭なしの例
+
+loads:                              # P1 では手入力の荷重（P2 で自動生成）
+  H:                                # 上部工の図心に法線直角方向の水平力
+    deck: [0, 1000, 0]
+  W:                                # 梁に鉛直等分布荷重
+    beams:
+      - {at: "*", w: [0, 0, -50]}

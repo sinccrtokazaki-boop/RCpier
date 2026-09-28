@@ -9,6 +9,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - テスト: `python -m pytest tests -q`
 - 計算例: `python examples/two_story_frame.py` / `python examples/from_yaml.py [入力.yaml]`
 - 計算書: `python -m rcframe.report 入力.yaml -o report.html`
+- 桟橋: `python examples/pier_example.py [入力.yaml]`
 
 ## 構成
 - `rcframe/materials.py` : Concrete（RC規準式のE）, RectSection（剛性増大率 phi_y/phi_z）, 鋼種・配筋
@@ -27,6 +28,9 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - `rcframe/ultimate.py`  : 荒川式 Qsu、部材種別・部材群・Ds、剛性率・偏心率・Fs・Fe（計算のみ）
 - `rcframe/capacity.py`  : 保有水平耐力の確認（run_ultimate → UltimateReport）、剛性率・偏心率（stiffness_eccentricity）
 - `rcframe/svg.py`       : 計算書の図（軸組図・伏図・モーメント図・曲線）。モーメント図は引張側に描く
+- `rcframe/grid.py`      : 通り芯と位置指定の解釈（GridMixin）、入力チェックの小道具（建物・桟橋で共通）
+- `rcframe/steel.py`     : 桟橋用の材料・断面（Steel、PipeSection、JsceConcrete）、Chang の β
+- `rcframe/pier.py`      : 桟橋（直杭式横桟橋）のモデル生成（Pier）。load_model は type: pier で Pier を返す
 - `rcframe/report.py`    : 計算書 HTML（1ファイル完結、外部参照禁止）。計算は既存関数を呼ぶだけで整形のみ
   - 規準書で照合が必要な事項は VERIFY_ITEMS、既知の簡略化は KNOWN_SIMPLIFICATIONS（README と揃える）
 
@@ -34,6 +38,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 単位: mm, N。表示のみ kN, kN·m
   - 例外: YAML の荷重欄（floor_loads, self_weight, extra_weights）は kN/m²・kN/m³・kN で入力し、
     読み込み時に換算する（building.py の KN_M2 等）。内部計算は常に mm, N
+  - 桟橋の YAML: 高さ・通り芯 m、断面寸法 mm、荷重 kN・kN/m・kN·m、kh kN/m³（pier.py の M, KN 等で換算）
 - 全体座標は Z 上向き。局所 x = i端→j端
 - 水平梁: 局所 z = 鉛直上向き。柱（i端が下）: 局所 y = 全体X, 局所 z = 全体Y
 - 局所自由度順: [ux, uy, uz, rx, ry, rz] × (i, j)
@@ -51,6 +56,10 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 1 済: 線形弾性エンジン → 2 済: モデル自動生成（YAML） → 3 済: 荷重自動生成（Ai分布等）
 → 4 済: 断面算定（RC規準 2018）→ 5 済: 非線形（材端ばね・増分法）→ 6 済: 保有水平耐力 → 7 済: 可視化・計算書（HTML）
 
+## 桟橋編のロードマップ（README.md 参照）
+基準: 港湾基準（2018）、コンクリート標準示方書（2022）。部分係数はプログラムに組み込まず YAML で入力する
+P1 済: モデル生成（仮想固定点）→ P2: 荷重・組合せ → P3: 照査 → P4: レベル2（プッシュオーバー）→ P5: 計算書
+
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
 - 柱梁接合部変形、壁・ブレースは未対応
@@ -59,3 +68,5 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 断面算定: 柱は X・Y 独立（2軸曲げ未対応）、中段筋無視、付着・接合部・曲げ降伏時せん断は未対応
 - 非線形: 曲げばねのみ、柱軸力は長期で固定、P-Δ なし
 - 保有水平耐力: 耐力壁なし（純ラーメンの Ds のみ）、FD の柱があれば部材群 D（安全側）、局部崩壊は判定しない
+- 桟橋: 杭は仮想固定点で固定（地盤ばねなし）、上部工は 1つの剛床、梁端の剛域なし
+- 照合が必要（桟橋）: 示方書の Ec の表（steel.JSCE_EC_TABLE）、鋼管のせん断形状係数 2

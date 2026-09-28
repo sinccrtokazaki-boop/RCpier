@@ -1,0 +1,36 @@
+"""計算例: 直杭式横桟橋のモデル生成と線形解析（桟橋編 P1）
+
+使い方: python examples/pier_example.py [入力ファイル.yaml]
+"""
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from rcframe import load_model
+
+path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("pier_example.yaml")
+pier = load_model(path)
+m = pier.model
+print(f"モデル {m.name}: 節点 {len(m.nodes)}, 要素 {len(m.elements)}, 杭 {len(pier.piles)}")
+
+print("\n=== 杭の仮想固定点（Chang の方法） ===")
+print(f"{'杭':<8} {'海底面[m]':>9} {'kh[kN/m³]':>10} {'1/β[m]':>7} {'固定点[m]':>9} {'杭長[m]':>8} {'自由長[m]':>9}")
+for (i, j), p in sorted(pier.piles.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+    if i != 0:
+        continue                       # 列ごとに同じなので各列の先頭だけ表示
+    print(f"{pier.gx[i][0]}/{pier.gy[j][0]:<5} {p['seabed'] / 1e3:9.2f} {p['kh'] * 1e6:10.0f} "
+          f"{1 / p['beta'] / 1e3:7.2f} {p['z_fix'] / 1e3:9.2f} {p['length'] / 1e3:8.2f} "
+          f"{p['free_length'] / 1e3:9.2f}")
+
+for case in sorted(set(m.nodal_loads) | set(m.member_loads)):
+    r = m.analyze(case)
+    print(f"\n=== 荷重ケース {case} ===")
+    if pier.master() is not None:
+        d = r.disp[pier.master()]
+        print(f"上部工の変位（図心）: ux={d[0]:.2f} uy={d[1]:.2f} mm, 回転 rz={d[5]:.2e} rad")
+    print(f"{'杭':<8} {'N[kN]':>9} {'Qx[kN]':>8} {'Qy[kN]':>8} {'杭頭 Mx方向[kN·m]':>16} {'固定点[kN·m]':>12}")
+    for (i, j), p in sorted(pier.piles.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        if i not in (0, 3):
+            continue
+        si, sj = r.section_forces(p["eid"], "face")
+        # 柱の局所 y = 全体 X、局所 z = 全体 Y。Y方向の曲げは My
+        print(f"{pier.gx[i][0]}/{pier.gy[j][0]:<5} {sj[0] / 1e3:9.1f} {sj[1] / 1e3:8.1f} {sj[2] / 1e3:8.1f} "
+              f"{sj[4] / 1e6:16.1f} {si[4] / 1e6:12.1f}")

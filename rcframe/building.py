@@ -20,6 +20,8 @@
 """
 import math
 
+from .grid import (ALL, _NONE, GridMixin, InputError, _as_list, _check_keys,  # noqa: F401
+                   _num, _vec)
 from .loads import TC, seismic_story_forces, tributary_profiles
 from .materials import (STEELS, Bars, BeamBars, BeamRebar, ColumnRebar, Concrete, Hoop,
                         RectSection, SteelGrade)
@@ -30,54 +32,20 @@ KN_M2 = 1e-3     # kN/m² → N/mm²
 KN_M3 = 1e-6     # kN/m³ → N/mm³
 KN = 1e3         # kN → N
 
-ALL = "*"
-_FORBIDDEN = ("/", "-", "*")
-_NONE = (None, "none", "None", "NONE")
-
-
-class InputError(ValueError):
-    """入力データの誤り"""
-
-
-def _num(v, what):
-    if isinstance(v, bool):
-        raise InputError(f"{what}: 数値ではありません: {v!r}")
-    try:
-        return float(v)   # PyYAML は 300e3 を文字列として読むため float() で変換
-    except (TypeError, ValueError):
-        raise InputError(f"{what}: 数値ではありません: {v!r}") from None
-
-
-def _vec(v, n, what):
-    if not isinstance(v, (list, tuple)) or len(v) != n:
-        raise InputError(f"{what}: {n} 成分のリストで指定してください: {v!r}")
-    return [_num(c, what) for c in v]
-
-
-def _check_keys(d, allowed, what):
-    if not isinstance(d, dict):
-        raise InputError(f"{what}: 辞書形式で指定してください: {d!r}")
-    unknown = set(d) - set(allowed)
-    if unknown:
-        raise InputError(f"{what}: 未知の項目 {sorted(map(str, unknown))}")
-
-
-def _as_list(v):
-    return v if isinstance(v, list) else [v]
-
-
-class Building:
+class Building(GridMixin):
     """通り芯・階・配置ルールから Model を生成する
 
     生成後は self.model に Model が入る。通り芯名から番号を引くには
     node(), column(), beam(), master(), drift_levels() を使う。
     """
-    TOP_KEYS = ("name", "materials", "sections", "defaults", "grids", "floors",
+    TOP_KEYS = ("type", "name", "materials", "sections", "defaults", "grids", "floors",
                 "columns", "beams", "openings", "loads",
                 "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic",
                 "steels", "design", "nonlinear", "ultimate", "report")
 
     def __init__(self, data: dict):
+        if str(data.get("type", "building")) != "building":
+            raise InputError("type: 建物の入力は type: building（省略可）です。桟橋は load_model を使ってください")
         _check_keys(data, self.TOP_KEYS, "トップレベル")
         self.name = str(data.get("name", "building"))
         self._read_materials(data.get("materials") or {})
@@ -240,29 +208,6 @@ class Building:
             "ds_override": ds,
         }
 
-    def _read_grids(self, grids):
-        if not isinstance(grids, dict) or set(grids) != {"x", "y"}:
-            raise InputError("grids: x と y の両方を指定してください")
-        self.gx, self.gy = [], []          # [(name, pos)]
-        seen = set()
-        for axis, out in (("x", self.gx), ("y", self.gy)):
-            g = grids[axis]
-            if not isinstance(g, dict) or not g:
-                raise InputError(f"grids.{axis}: {{通り芯名: 位置}} の形式で指定してください")
-            for name, pos in g.items():
-                name = str(name)
-                if any(c in name for c in _FORBIDDEN):
-                    raise InputError(f"通り芯名 {name!r} に / - * は使えません")
-                if name in seen:
-                    raise InputError(f"通り芯名 {name!r} が重複しています")
-                seen.add(name)
-                out.append((name, _num(pos, f"通り芯 {name}")))
-            ps = [p for _, p in out]
-            if any(b <= a for a, b in zip(ps, ps[1:])):
-                raise InputError(f"grids.{axis}: 位置は昇順で指定してください")
-        self.ix = {n: k for k, (n, _) in enumerate(self.gx)}
-        self.iy = {n: k for k, (n, _) in enumerate(self.gy)}
-
     def _read_floors(self, floors):
         if not isinstance(floors, dict) or len(floors) < 2:
             raise InputError("floors: {階名: 床レベル} で 2 階分以上指定してください")
@@ -291,63 +236,6 @@ class Building:
                                  "（柱は最上階、梁・吹抜けは最下階に置けません）")
             out.append(self.fi[name])
         return out
-
-    def _grid_index(self, name, table, what):
-        if name not in table:
-            raise InputError(f"{what}: 未定義の通り芯 {name!r}")
-        return table[name]
-
-    def _range(self, s, table, what):
-        """"A-B" または "*" -> (i0, i1)（i0 < i1）"""
-        n = len(table)
-        if s == ALL:
-            return 0, n - 1
-        parts = s.split("-")
-        if len(parts) != 2:
-            raise InputError(f"{what}: 範囲は \"始点-終点\" で指定してください: {s!r}")
-        a, b = (self._grid_index(p, table, what) for p in parts)
-        if a == b:
-            raise InputError(f"{what}: 範囲の始点と終点が同じです: {s!r}")
-        return min(a, b), max(a, b)
-
-    def _column_points(self, at, what):
-        pts = []
-        for s in _as_list(at):
-            s = str(s)
-            if s == ALL:
-                s = "*/*"
-            parts = s.split("/")
-            if len(parts) != 2:
-                raise InputError(f"{what}: 柱の位置は \"X通り/Y通り\" で指定してください: {s!r}")
-            xs = range(len(self.gx)) if parts[0] == ALL else [self._grid_index(parts[0], self.ix, what)]
-            ys = range(len(self.gy)) if parts[1] == ALL else [self._grid_index(parts[1], self.iy, what)]
-            pts += [(i, j) for i in xs for j in ys]
-        return pts
-
-    def _beam_spans(self, at, what):
-        """-> [("x", iy, ix) / ("y", ix, iy)]（ix/iy はスパン始点側の通り芯番号）"""
-        spans = []
-        for s in _as_list(at):
-            s = str(s)
-            if s == ALL:
-                spans += [("x", j, i) for j in range(len(self.gy)) for i in range(len(self.gx) - 1)]
-                spans += [("y", i, j) for i in range(len(self.gx)) for j in range(len(self.gy) - 1)]
-                continue
-            parts = s.split("/")
-            if len(parts) != 2 or parts[0] == ALL:
-                raise InputError(f"{what}: 梁の位置は \"通り/始点-終点\" で指定してください: {s!r}")
-            line, rng = parts
-            if line in self.iy:            # Y通り上の X方向梁
-                j = self.iy[line]
-                i0, i1 = self._range(rng, self.ix, what)
-                spans += [("x", j, i) for i in range(i0, i1)]
-            elif line in self.ix:          # X通り上の Y方向梁
-                i = self.ix[line]
-                j0, j1 = self._range(rng, self.iy, what)
-                spans += [("y", i, j) for j in range(j0, j1)]
-            else:
-                raise InputError(f"{what}: 未定義の通り芯 {line!r}")
-        return spans
 
     # ============================================================ 配置ルール
     def _apply_rule(self, r, kind):
@@ -384,16 +272,6 @@ class Building:
                 target.pop(k, None)
             else:
                 target[k] = val
-
-    def _area_cells(self, area, what):
-        """"X範囲/Y範囲" または "*" -> 床区画 [(ix, iy)]"""
-        area = str(area)
-        parts = ["*", "*"] if area == ALL else area.split("/")
-        if len(parts) != 2:
-            raise InputError(f"{what}: area は \"X範囲/Y範囲\" で指定してください: {area!r}")
-        i0, i1 = self._range(parts[0], self.ix, what)
-        j0, j1 = self._range(parts[1], self.iy, what)
-        return [(i, j) for i in range(i0, i1) for j in range(j0, j1)]
 
     def _apply_opening(self, r):
         what = f"吹抜け {r}"
