@@ -166,17 +166,23 @@ class Model:
 
     def assemble_K(self):
         idx, n = self._index()
-        rows, cols, vals = [], [], []
-        for e in self.elements.values():
+        elems = list(self.elements.values())
+        for e in elems:
             e.prepare(self.nodes[e.ni].xyz, self.nodes[e.nj].xyz)
-            d = np.r_[6 * idx[e.ni] + np.arange(6), 6 * idx[e.nj] + np.arange(6)]
-            r, c = np.meshgrid(d, d, indexing="ij")
-            rows.append(r.ravel()); cols.append(c.ravel()); vals.append(e.k_global.ravel())
-        for nid, k in self.node_springs.items():
-            d = 6 * idx[nid] + np.arange(6)
-            rows.append(d); cols.append(d); vals.append(np.asarray(k, float))
-        K = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
-                          shape=(n, n)).tocsr()
+        # 自由度番号の配列は、節点・要素・節点ばねの構成が同じなら使い回す（非線形解析の高速化）
+        key = (tuple(idx), tuple((e.id, e.ni, e.nj) for e in elems), tuple(self.node_springs))
+        if getattr(self, "_asm_key", None) != key:
+            rows, cols = [], []
+            for e in elems:
+                d = np.r_[6 * idx[e.ni] + np.arange(6), 6 * idx[e.nj] + np.arange(6)]
+                rows.append(np.repeat(d, 12)); cols.append(np.tile(d, 12))
+            for nid in self.node_springs:
+                d = 6 * idx[nid] + np.arange(6)
+                rows.append(d); cols.append(d)
+            self._asm_rc = (np.concatenate(rows), np.concatenate(cols))
+            self._asm_key = key
+        vals = [e.k_global.ravel() for e in elems] + [np.asarray(k, float) for k in self.node_springs.values()]
+        K = sp.coo_matrix((np.concatenate(vals), self._asm_rc), shape=(n, n)).tocsr()
         return K, idx, n
 
     def _element_loads(self, case):

@@ -167,6 +167,10 @@ def run_level2(pier, direction="+y", results=None):
         for e in m.elements.values():
             e.springs = None
     po.direction = name
+    u, face, node, idx = po._state                            # 最終状態（3D 表示・図用）
+    po.final = Result(m, f"レベル2 {name}", {nid: u[6 * k:6 * k + 6].copy() for nid, k in idx.items()},
+                      {eid: {"face": face[eid].copy(), "node": node[eid].copy()} for eid in face}, {},
+                      {c: 1.0 for c in gcases})
     out = Level2Result(name, po, W, kinds=kinds, soil=ns, warnings=warns + po.warnings)
     _evaluate(pier, out, opt, gcases, res)
     return out

@@ -139,6 +139,7 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
     node = {eid: np.zeros(12) for eid in E}
     res = PushoverResult("", hinges=hinges, labels=labels, levels=levels)
     lat_total = sum(F[d] for _, F in pattern)
+    edofs = {eid: np.r_[6 * idx[e.ni] + np.arange(6), 6 * idx[e.nj] + np.arange(6)] for eid, e in E.items()}
 
     def solve(phase, tang):
         for eid, keys in by_elem.items():
@@ -168,10 +169,14 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
         du = C @ ur
         dface, dnode = {}, {}
         for eid, e in E.items():
-            dg = np.r_[du[6 * idx[e.ni]:6 * idx[e.ni] + 6], du[6 * idx[e.nj]:6 * idx[e.nj] + 6]]
-            pf, pr = eloads[eid] if eid in eloads else (np.zeros(12), np.zeros(12))
-            dface[eid] = e.k_flex @ (e.H @ (e.T @ dg)) - pf
-            dnode[eid] = e.H.T @ dface[eid] - pr
+            dg = du[edofs[eid]]
+            if eid in eloads:
+                pf, pr = eloads[eid]
+                dface[eid] = e.k_flex @ (e.H @ (e.T @ dg)) - pf
+                dnode[eid] = e.H.T @ dface[eid] - pr
+            else:
+                dface[eid] = e.k_flex @ (e.H @ (e.T @ dg))
+                dnode[eid] = e.H.T @ dface[eid]
         return du, dface, dnode
 
     def drifts(vec):

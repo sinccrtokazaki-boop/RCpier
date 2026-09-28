@@ -69,6 +69,7 @@ class Pier(GridMixin):
         self.gamma_rc = _num(uw.get("rc", 24.5), "unit_weight.rc") * KN_M3
         self.weights = {}          # ケース -> (重量 [N], xg, yg)、"地震用" = D + Ls
         self.seismic = None        # レベル1地震動の設定と地震用重量
+        self.fenders, self.bollards = [], []   # 防舷材・係船柱の位置 x [mm]（図用）
         if data.get("actions"):
             self._generate_actions(data["actions"])
         for case, spec in (data.get("loads") or {}).items():   # 手入力の荷重は加算
@@ -416,6 +417,7 @@ class Pier(GridMixin):
                 mu = _num(f.get("friction", 0.0), what)
                 P = [_num(f["x"], what) * M, y_face, _num(f["z"], what) * M]
                 self._point_load("B", P, [mu * R, -R, 0.0], what)
+                self.fenders.append(P[0])
         # ---- T: 牽引力（係船柱は上部工の海側前面・天端）
         if a.get("T") is not None:
             _check_keys(a["T"], ("bollards",), "actions.T")
@@ -428,6 +430,7 @@ class Pier(GridMixin):
                 F = mooring_force(_num(b["P"], what) * KN, _num(b.get("angle_h", 0), what),
                                   _num(b.get("angle_v", 0), what))
                 self._point_load("T", [_num(b["x"], what) * M, y_face, self.deck_top], F, what)
+                self.bollards.append(_num(b["x"], what) * M)
         # ---- 重量と重心（地震用: D + Ls）
         tot = WeightSum()
         for c, ws in wsum.items():

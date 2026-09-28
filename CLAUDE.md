@@ -40,6 +40,9 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 地盤ばね: Model.add_node_spring（対角ばね）、Result.spring_forces。pushover の node_springs で非線形化
 - Element.prepare は形状・ばねが変わらなければ再計算しない（_prep_key）
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
+- `rcframe/pier_report.py`: 桟橋の計算書（章立て SECTIONS）。report.assemble_html・viewer_html を共通に使う。
+  report.build_report / write_report は Pier を自動で振り分ける
+- 高速化のキャッシュ: Model.assemble_K の自由度番号配列（_asm_key）、pushover の要素の自由度配列（edofs）
 - `rcframe/report.py`    : 計算書 HTML（1ファイル完結、外部参照禁止）。計算は既存関数を呼ぶだけで整形のみ
   - 規準書で照合が必要な事項は VERIFY_ITEMS、既知の簡略化は KNOWN_SIMPLIFICATIONS（README と揃える）
 
@@ -67,7 +70,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 
 ## 桟橋編のロードマップ（README.md 参照）
 基準: 港湾基準（2018）、コンクリート標準示方書（2022）。部分係数はプログラムに組み込まず YAML で入力する
-P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P3 済: 照査 → P4 済: レベル2（地盤ばね・プッシュオーバー）→ P5: 計算書
+P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P3 済: 照査 → P4 済: レベル2（地盤ばね・プッシュオーバー）→ P5 済: 計算書（HTML）
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用

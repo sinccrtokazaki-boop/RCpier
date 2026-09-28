@@ -281,6 +281,149 @@ def curve_chart(series, marks=(), width=720, height=380, xmax=None):
     return svg(width, height, body)
 
 
+# ============================================================ 汎用の折れ線グラフ
+def xy_chart(series, xlabel, ylabel, marks=(), hmarks=(), width=720, height=380, xfmt="{:g}", yfmt="{:g}"):
+    """series: [(名前, [(x, y)], クラス)]、marks: [(x, 説明)] の縦線、hmarks: [(y, 説明)] の横線"""
+    ml, mr, mt, mb = 70, 140, 20, 50
+    xm = max([abs(x) for _, pts, _ in series for x, _ in pts] + [m_[0] for m_ in marks] + [1e-12]) * 1.05
+    ym = max([y for _, pts, _ in series for _, y in pts] + [m_[0] for m_ in hmarks] + [1e-12]) * 1.1
+    W, H = width - ml - mr, height - mt - mb
+    P = lambda x, y: (ml + x / xm * W, mt + H - y / ym * H)
+    body = [line(P(0, 0), P(xm, 0), "axis"), line(P(0, 0), P(0, ym), "axis")]
+    for t in _nice_ticks(ym):
+        body.append(line(P(0, t), P(xm, t), "tick"))
+        body.append(text(P(0, t), yfmt.format(t), "axlbl", anchor="end", dy=4))
+    for t in _nice_ticks(xm):
+        body.append(line(P(t, 0), P(t, ym), "tick"))
+        body.append(text(P(t, 0), xfmt.format(t), "axlbl", dy=16))
+    for x, label in marks:
+        body.append(line(P(x, 0), P(x, ym), "mark"))
+        body.append(text(P(x, ym), label, "marklbl", anchor="start", dy=12))
+    for y, label in hmarks:
+        body.append(line(P(0, y), P(xm, y), "mark"))
+        body.append(text(P(xm, y), label, "marklbl", anchor="end", dy=-4))
+    for k, (name, pts, cls) in enumerate(series):
+        body.append(poly([P(abs(x), y) for x, y in pts], f"curve {cls}", closed=False))
+        body.append(line((width - mr + 12, mt + 16 + 18 * k), (width - mr + 36, mt + 16 + 18 * k),
+                         f"curve {cls}"))
+        body.append(text((width - mr + 42, mt + 20 + 18 * k), name, "axlbl", anchor="start"))
+    body.append(text((ml + W / 2, height - 8), xlabel, "axlbl"))
+    body.append(f'<text class="axlbl" transform="translate(16,{mt + H / 2:.0f}) rotate(-90)" '
+                f'text-anchor="middle">{escape(ylabel)}</text>')
+    return svg(width, height, body)
+
+
+# ============================================================ 桟橋
+def pier_plan(pier, width=720):
+    """桟橋の平面図: 上部工の外形（張出しを含む）、梁、杭（外径の実寸）、防舷材・係船柱"""
+    m = pier.model
+    y0 = pier.gy[0][1] - pier.overhang["land"]
+    y1 = pier.gy[-1][1] + pier.overhang["sea"]
+    x0, x1 = pier.gx[0][1], pier.gx[-1][1]
+    V = View(x0, x1, y0, y1, width=width, margin=(40, 60, 40, 60), max_height=420)
+    a, b = V.p(x0, y1), V.p(x1, y0)
+    body = [f'<rect class="deck" x="{_f(a[0])}" y="{_f(a[1])}" width="{_f(b[0] - a[0])}" '
+            f'height="{_f(b[1] - a[1])}"/>']
+    for name, x in pier.gx:
+        body.append(line(V.p(x, y0), V.p(x, y1), "gridline"))
+        body.append(text(V.p(x, y0), name, "gridlbl", dy=26))
+    for name, y in pier.gy:
+        body.append(line(V.p(x0, y), V.p(x1, y), "gridline"))
+        px, py = V.p(x0, y)
+        body.append(text((px - 26, py), name, "gridlbl", anchor="end", dy=4))
+    for key, eid in pier.elem_ids.items():
+        if key[0] in ("x", "y"):
+            e = m.elements[eid]
+            p0, p1 = m.nodes[e.ni], m.nodes[e.nj]
+            body.append(line(V.p(p0.x, p0.y), V.p(p1.x, p1.y), "mem-b"))
+    for (i, j), (sec, _) in pier.pile_sec.items():
+        c = V.p(pier.gx[i][1], pier.gy[j][1])
+        body.append(circle(c, max(3.0, sec.D / 2 * V.s), "pile", f"杭 {pier.gx[i][0]}/{pier.gy[j][0]} φ{sec.D:g}"))
+    for name, pts, cls in (("防舷材", pier.fenders, "fender"), ("係船柱", pier.bollards, "bollard")):
+        for x in pts:
+            body.append(circle(V.p(x, y1), 5, cls, f"{name} x = {x / 1e3:g} m"))
+    body.append(text((V.w - 8, 14), "↑ 海側（+Y）", "axlbl", anchor="end"))
+    return svg(V.w, V.h, body)
+
+
+def pier_frame(pier, x_name, res=None, scale=0.0, po=None, width=720):
+    """X通り x_name の法線直角方向の断面（Y方向の梁・杭・海底面）
+    res を与えると曲げモーメント図（引張側）、po を与えるとレベル2の塑性ヒンジを描く"""
+    m = pier.model
+    i = pier.ix[x_name]
+    piles = [(ij, info) for ij, info in pier.piles.items() if ij[0] == i]
+    beams = [(k, e) for k, e in pier.elem_ids.items() if k[0] == "y" and k[1] == i]
+    zb = min([info.get("tip", info["z_fix"]) for _, info in piles] + [pier.z_soffit])
+    y0 = pier.gy[0][1] - pier.overhang["land"]
+    y1 = pier.gy[-1][1] + pier.overhang["sea"]
+    V = View(y0, y1, zb, pier.deck_top, width=width, margin=(30, 70, 34, 70), max_height=620)
+    body = [line(V.p(y0, pier.deck_top), V.p(y1, pier.deck_top), "deckline"),
+            line(V.p(y0, pier.z_soffit), V.p(y1, pier.z_soffit), "deckline")]
+    for name, y in pier.gy:
+        body.append(text(V.p(y, zb), name, "gridlbl", dy=24))
+    labels = []
+    members = [(e, 1) for _, e in beams] + [(eid, 1) for _, info in piles for eid in info["elements"]]
+    for (i_, j), info in piles:                      # 海底面（杭の位置の前後）と固定点
+        y = pier.gy[j][1]
+        body.append(line(V.p(y - 2500, info["seabed"]), V.p(y + 2500, info["seabed"]), "seabed"))
+        body.append(text(V.p(y + 2500, info["seabed"]), f"{info['seabed'] / 1e3:+.1f}", "axlbl",
+                         anchor="start", dy=4))
+        if pier.pile_model == "fixed_point":
+            body.append(poly([V.p(y, info["z_fix"]), (V.p(y, info["z_fix"])[0] - 7, V.p(y, info["z_fix"])[1] + 10),
+                              (V.p(y, info["z_fix"])[0] + 7, V.p(y, info["z_fix"])[1] + 10)], "fixmark"))
+    for eid, plane in members:
+        e = m.elements[eid]
+        a, b = m.nodes[e.ni], m.nodes[e.nj]
+        p0, p1 = (a.y, a.z), (b.y, b.z)
+        if res is not None and scale:
+            L = math.dist(a.xyz, b.xyz)
+            xs = sorted(set(np.linspace(0.0, L, 7)) | {e.rigid_i, L - e.rigid_j})
+            Ms, vs = member_moment_offsets(res, e, plane, xs)
+            offs = [(v[1] * scale, v[2] * scale) for v in vs]
+            pts = moment_diagram_points(p0, p1, [x / L for x in xs], offs)
+            body.append(poly([V.p(*q) for q in pts], "mdia"))
+        body.append(line(V.p(*p0), V.p(*p1), "mem-c" if e.kind == "column" else "mem-b"))
+    if res is not None and scale:                    # 数値: 杭頭・梁端・梁中央・杭の地中部の最大
+        for _, e_id in beams:
+            e = m.elements[e_id]
+            L = math.dist(m.nodes[e.ni].xyz, m.nodes[e.nj].xyz)
+            for x, anchor, dx in ((0.0, "start", 6), (L / 2, "middle", 0), (L, "end", -6)):   # 端は材の内側へ
+                M = abs(res.section_forces_at(e_id, x)[4])
+                q = V.p(m.nodes[e.ni].y + (m.nodes[e.nj].y - m.nodes[e.ni].y) * x / L, pier.z_model)
+                labels.append(text((q[0] + dx, q[1]), f"{M / 1e6:.0f}", "mval", anchor=anchor, dy=-8))
+        for _, info in piles:
+            e = m.elements[info["eid"]]
+            L = math.dist(m.nodes[e.ni].xyz, m.nodes[e.nj].xyz)
+            Mh = abs(res.section_forces_at(info["eid"], L - e.rigid_j)[4])
+            labels.append(text(V.p(m.nodes[e.nj].y, pier.z_soffit), f"{Mh / 1e6:.0f}", "mval", dy=14))
+            gm = [(abs(res.section_forces_at(k, 0.0)[4]), m.nodes[m.elements[k].ni].z)
+                  for k in info["elements"]]
+            Mg, zg = max(gm)
+            labels.append(text(V.p(m.nodes[e.nj].y, zg), f"{Mg / 1e6:.0f}", "mval", anchor="start", dy=4))
+    if po is not None:
+        order = {}
+        for ev in po.events:
+            if ev["event"] == "降伏" and ev["key"] not in order:
+                order[ev["key"]] = ev["step"]
+        ranks = {k: n + 1 for n, k in enumerate(sorted(order, key=order.get))}
+        for eid, plane in members:
+            for end in (0, 1):
+                hk = (eid, 1, end)
+                h = po.hinges.get(hk)
+                if h is None or h.state == "弾性":
+                    continue
+                e = m.elements[eid]
+                a, b = m.nodes[e.ni], m.nodes[e.nj]
+                L = math.dist(a.xyz, b.xyz)
+                x = e.rigid_i if end == 0 else L - e.rigid_j
+                q = V.p(a.y + (b.y - a.y) * x / L, a.z + (b.z - a.z) * x / L)
+                labels.append(circle(q, 5.5 if h.state == "降伏" else 4, "h-y" if h.state == "降伏" else "h-c",
+                                     f"{po.labels[hk]}: {h.state}"))
+                if hk in ranks:
+                    labels.append(text(q, str(ranks[hk]), "hnum", anchor="start", dy=-6))
+    return svg(V.w, V.h, body + labels)
+
+
 # ============================================================ 静止 3D 図（印刷用）
 def isometric(bld, width=720, yaw=-0.6, pitch=0.5):
     """骨組の軸測投影（画面の 3D 表示と同じ視点の静止図）"""

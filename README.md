@@ -278,12 +278,19 @@ write_report(load_building("input.yaml"), "report.html")
 | P2 | 荷重（自重・上載荷重・接岸力・牽引力・レベル1地震動）と部分係数による組合せ | 済 |
 | P3 | 照査（上部工 RC、鋼管杭、杭の支持力） | 済 |
 | P4 | レベル2地震動（プッシュオーバー）、地盤ばねモデル | 済 |
-| P5 | 計算書（HTML） | 予定 |
+| P5 | 計算書（HTML） | 済 |
 
 ```
 python examples/pier_example.py examples/pier_example.yaml    # 仮想固定点モデル（P1〜P3）
 python examples/pier_example.py examples/pier_level2.yaml     # 地盤ばねモデルとレベル2（P4）
+python -m rcframe.report examples/pier_level2.yaml -o pier_report.html   # 計算書（P5）
 ```
+
+**計算書（P5）**: 建物編と同じ 1ファイル完結の HTML。`python -m rcframe.report` と `write_report` は
+入力の `type` で建物・桟橋を自動で切り替える。章: 概要（諸元・平面図・断面図・杭の諸元）、荷重と組合せ、
+解析結果（3D 表示、組合せごとの変位・杭の軸力と曲げ、Y方向の断面の曲げモーメント図）、照査、
+レベル2（荷重–変位曲線・判定・全塑性の発生順序・塑性ヒンジ図）、付録（照合が必要な事項・既知の簡略化・警告・入力データ）。
+照査・レベル2の指定がなければその章は省略。レベル2を含む計算例の出力には 1分程度かかる
 ```python
 from rcframe import load_model
 pier = load_model("examples/pier_example.yaml")   # type: pier なら Pier、それ以外は Building

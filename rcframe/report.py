@@ -77,13 +77,16 @@ svg.fig{max-width:100%;height:auto;display:block}
 .gridlbl,.axlbl{font-size:12px;fill:var(--mute)}
 .mem-c{stroke:#1f4e79;stroke-width:3}.mem-b{stroke:#5b8c3a;stroke-width:3}
 .mdia{fill:rgba(192,57,43,.14);stroke:#c0392b;stroke-width:1.2}
-.mval{font-size:10.5px;fill:#8e2a1f;text-anchor:middle}
+.mval{font-size:10.5px;fill:#8e2a1f}
 .mem-r{stroke-width:5}.r-lo{stroke:#9cc3e6}.r-mid{stroke:#3b82c4}.r-hi{stroke:#e69f00}
 .r-ng{stroke:#c0392b}.r-none{stroke:#ccc}
 .rval{font-size:11px;fill:#333;text-anchor:middle}
 .h-y{fill:#c0392b;stroke:#fff;stroke-width:1.5}.h-c{fill:#e69f00;stroke:#fff;stroke-width:1}
 .hnum{font-size:10px;fill:#8e2a1f;font-weight:700;text-anchor:middle}
 .opening{fill:#eceff3}.col{fill:#1f4e79}.plbl{font-size:10.5px;fill:#3d6b25}
+.deck{fill:#f1f3f6;stroke:#9aa3ad;stroke-width:1}.pile{fill:#1f4e79;fill-opacity:.85}
+.fender{fill:#e69f00}.bollard{fill:#8e44ad}.deckline{stroke:#9aa3ad;stroke-width:1}
+.seabed{stroke:#8d6e3f;stroke-width:2}.fixmark{fill:#8d6e3f}
 .axis{stroke:#555;stroke-width:1.2}.tick{stroke:#e3e6ea;stroke-width:1}
 .mark{stroke:#c0392b;stroke-width:1;stroke-dasharray:4 3}.marklbl{font-size:11px;fill:#c0392b}
 .curve{fill:none;stroke-width:2}.c0{stroke:#1f4e79}.c1{stroke:#e69f00}.c2{stroke:#1b7f3b}
@@ -323,24 +326,29 @@ def sec_loads(bld, ctx):
 
 
 def _viewer(bld, ctx):
-    m = bld.model
+    results = dict(ctx["lin"])
+    if ctx["rL"] is not None and len(ctx["long"]) > 1:
+        results[ctx["rL"].case] = ctx["rL"]
+    for d, po in (ctx.get("pushovers") or {}).items():
+        results[f"プッシュオーバー {d}（最終）"] = po.final
+    return viewer_html(bld.model, results, ctx.get("pushovers") or {})
+
+
+def viewer_html(m, results, pushovers, column_label="柱"):
+    """3D 表示（モデル、変形図、ヒンジ）の HTML と埋め込みデータ
+    results: {名前: Result}（変位を表示）、pushovers: {名前: PushoverResult}（最終状態のヒンジ）"""
     used = sorted({n for e in m.elements.values() for n in (e.ni, e.nj)})
     data = {"nodes": {str(n): [round(float(v), 1) for v in m.nodes[n].xyz] for n in used},
             "elems": [[str(e.ni), str(e.nj), "c" if e.kind == "column" else "b"] for e in m.elements.values()],
             "cases": {}, "auto": {}, "hinges": {}}
     size = max(float(max(m.nodes[n].xyz[a] for n in used) - min(m.nodes[n].xyz[a] for n in used))
                for a in range(3)) or 1.0
-    results = dict(ctx["lin"])
-    if ctx["rL"] is not None and len(ctx["long"]) > 1:
-        results[ctx["rL"].case] = ctx["rL"]
-    for d, po in (ctx.get("pushovers") or {}).items():
-        results[f"プッシュオーバー {d}（最終）"] = po.final
     for name, r in results.items():
         disp = {str(n): [float(r.disp[n][k]) for k in range(3)] for n in used}
         mx = max(max(abs(v) for v in d) for d in disp.values())
         data["cases"][name] = {k: [round(v, 4) for v in d] for k, d in disp.items()}
         data["auto"][name] = 0.08 * size / mx if mx > 0 else 1.0
-    for d, po in (ctx.get("pushovers") or {}).items():
+    for d, po in pushovers.items():
         pts = []
         for (eid, plane, end), h in po.hinges.items():
             if h.state == "弾性":
@@ -361,7 +369,7 @@ def _viewer(bld, ctx):
             f'<label>倍率 <input id="v-scale" type="range" min="0.2" max="5" step="0.1" value="1"></label>'
             f'{hsel}<span id="v-info" class="mute"></span></div>'
             f'<canvas id="viewer"></canvas>'
-            f'<div class="legend"><span><i class="sw" style="background:#1f4e79"></i>柱</span>'
+            f'<div class="legend"><span><i class="sw" style="background:#1f4e79"></i>{escape(column_label)}</span>'
             f'<span><i class="sw" style="background:#5b8c3a"></i>梁</span>'
             f'<span><i class="sw" style="background:#e69f00"></i>ひび割れ</span>'
             f'<span><i class="sw" style="background:#c0392b"></i>降伏</span></div></div>'
@@ -568,40 +576,48 @@ SECTIONS = (
 )
 
 
-def build_report(bld, ctx=None):
-    """計算書の HTML（文字列）を返す"""
-    ctx = ctx or _compute(bld)
+def assemble_html(obj, sections, ctx, cover_html):
+    """章 [(id, 題名, 関数(obj, ctx) -> HTML or None)] から計算書の HTML を組み立てる（建物・桟橋で共通）"""
     parts, toc = [], []
-    for k, (sid, title, fn) in enumerate(SECTIONS, 1):
-        body = fn(bld, ctx)
+    for sid, title, fn in sections:
+        body = fn(obj, ctx)
         if body is None:
             continue
         n = len(toc) + 1
         toc.append(f'<li><a href="#{sid}">{escape(title)}</a></li>')
         parts.append(f'<section id="{sid}"><h2>{n}. {escape(title)}</h2>{body}</section>')
-    title = bld.report.get("title") or f"構造計算書 {bld.name}"
+    title = obj.report.get("title") or f"構造計算書 {obj.name}"
     return ("<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{escape(title)}</title><style>{CSS}</style></head><body><main>"
-            f"{_cover(bld)}<nav class=\"toc\"><b>目次</b><ol>{''.join(toc)}</ol></nav>"
+            f"{cover_html}<nav class=\"toc\"><b>目次</b><ol>{''.join(toc)}</ol></nav>"
             f"{''.join(parts)}</main><script>{JS}</script></body></html>")
 
 
-def write_report(bld, path):
+def build_report(obj, ctx=None):
+    """計算書の HTML（文字列）を返す（Building / Pier）"""
+    from .pier import Pier
+    if isinstance(obj, Pier):
+        from .pier_report import build_pier_report
+        return build_pier_report(obj, ctx)
+    return assemble_html(obj, SECTIONS, ctx or _compute(obj), _cover(obj))
+
+
+def write_report(obj, path):
     """計算書を HTML ファイルに書き出してパスを返す"""
     path = Path(path)
-    path.write_text(build_report(bld), encoding="utf-8")
+    path.write_text(build_report(obj), encoding="utf-8")
     return path
 
 
 def main(argv=None):
-    from .io_yaml import load_building
-    ap = argparse.ArgumentParser(description="YAML 入力から計算書（HTML）を作成する")
+    from .io_yaml import load_model
+    ap = argparse.ArgumentParser(description="YAML 入力（建物・桟橋）から計算書（HTML）を作成する")
     ap.add_argument("input", help="入力 YAML ファイル")
     ap.add_argument("-o", "--output", help="出力 HTML（省略時は入力名_report.html）")
     a = ap.parse_args(argv)
     out = a.output or str(Path(a.input).with_name(Path(a.input).stem + "_report.html"))
-    p = write_report(load_building(a.input), out)
+    p = write_report(load_model(a.input), out)
     print(f"計算書を出力しました: {p}")
 
 
