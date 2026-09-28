@@ -1,7 +1,7 @@
 # rcframe — RC造 3次元フレーム解析システム
 
 実務の設計補助を目的とした、Python 製の RC 造立体骨組解析プログラムです。
-現在はフェーズ5（非線形解析: 材端ばねモデルによるプッシュオーバー）まで実装しています。
+現在はフェーズ6（保有水平耐力の確認）まで実装しています。
 
 ## 動作環境
 Python 3.10 以上、numpy、scipy、PyYAML（テストには pytest）
@@ -12,7 +12,7 @@ python -m pytest tests          # 理論解との照合テスト
 python examples/two_story_frame.py
 python examples/from_yaml.py examples/two_story_frame.yaml
 python examples/from_yaml.py examples/two_story_auto_loads.yaml   # 荷重の自動生成
-python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定・プッシュオーバー
+python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定・プッシュオーバー・保有水平耐力
 ```
 
 ## 実装済みの機能
@@ -33,6 +33,8 @@ python examples/from_yaml.py examples/two_story_design.yaml       # 断面算定
 - 断面算定（RC規準 2018）: 長期・短期の荷重組合せ、梁の曲げ・せん断、柱の軸力と曲げ・せん断、構造規定の警告
 - 静的非線形解析（プッシュオーバー）: 材端ばねモデル（トリリニア骨格・最大点指向型）、
   事象追跡型の荷重増分法、長期荷重 → Ai 分布の水平力、ひび割れ・降伏の発生順序
+- 保有水平耐力の確認: せん断終局強度（荒川式）と破壊形式、部材種別・部材群・Ds、
+  剛性率・偏心率と Fes、崩壊機構の検出、Qu ≧ Qun の判定
 
 ## 入力ファイル（YAML）
 例: [examples/two_story_frame.yaml](examples/two_story_frame.yaml)
@@ -203,6 +205,44 @@ nonlinear:
 - **解析法**: 事象追跡型の荷重増分法。各ステップは次のばねの折れ点まで（ばねが折れ線なので厳密で、
   不釣合い力や収束計算がない）。長期荷重 G+P を載荷後、Ai 分布の水平力（重心のずれの Mz を含む）を比例増加
 
+### 保有水平耐力（令82条の3）
+例: [examples/two_story_design.yaml](examples/two_story_design.yaml)（`ultimate` の項）
+
+```python
+from rcframe import load_building, run_ultimate
+bld = load_building("examples/two_story_design.yaml")
+rep = run_ultimate(bld)          # ±X, ±Y のプッシュオーバーを実行して判定
+rep.print_summary()              # 層・方向ごとの Qu, Qud, 部材群, Ds, Fs, Fe, Fes, Qun, Qu/Qun
+rep.print_members()              # 部材の Qmu, Qsu, 破壊形式, 部材種別
+rep.print_eccentricity()         # 剛性率・偏心率の計算表
+rep.ok, rep.stories, rep.pushovers
+```
+
+```yaml
+ultimate:
+  qsu: min                    # 荒川 min 式 / mean 式
+  qsu_factor: 1.0             # 曲げ破壊先行の条件 Qsu ≧ 係数·Qmu
+  drift_limit: 0.01           # Qu を決める層間変形角の上限
+  stop_at_column_shear: true  # 柱のせん断破壊の時点で Qu を決める
+  ds_override: {1F: 0.35}     # Ds を手動で指定する層（任意）
+```
+
+- **Qu**: Ai 分布の水平力によるプッシュオーバーで、崩壊機構の形成・層間変形角の上限・柱のせん断破壊
+  のうち最初の時点の各層の層せん断力（= 荷重係数 × Ai 分布の Qi）。
+  崩壊機構は、降伏したばねを解放（ピン）した接線剛性が水平力に対して不安定になることで検出し、
+  変形が集中する層から全体崩壊形・部分崩壊形を表示
+- **Qud** = C0 = 1.0 の地震層せん断力（Ai 分布の Qi / C0）、**Qun** = Ds·Fes·Qud
+- **せん断終局強度**（荒川式）: Qsu = {k·pt^0.23·(Fc+18)/(M/(Q·d)+0.12) + 0.85√(pw·σwy) + 0.1σ0}·b·j、
+  k = 0.053（min）/ 0.068（mean）、M/(Q·d) = 内法長さ/(2d)（1〜3）、pw ≦ 1.2%、σwy = F、σ0 は長期軸力
+- **破壊形式**: Qmu = 両端の My の和 / 内法長さ（梁は長期せん断力を加算）。Qsu < 係数·Qmu、
+  または解析中にせん断力が Qsu に達した部材はせん断破壊（FD）
+- **部材種別**（昭55建告第1792号 第4）: 柱は h0/D, σ0/Fc, pt, τu/Fc、梁は τu/Fc（τu = Qmu/(b·D)）。
+  柱の種別は柱頭・柱脚に接続する加力方向の梁の種別のうち低い方も考慮
+- **部材群**: Qu 時の柱のせん断力の割合 γ から A（γA ≧ 0.5 かつ γC ≦ 0.2）/ B（γC < 0.5）/ C（γC ≧ 0.5）、
+  FD の柱があれば D。**Ds**（RC 純ラーメン）A 0.30, B 0.35, C 0.40, D 0.45
+- **Fes = Fs·Fe**（令82条の6、昭55建告第1791号・第1792号 第7）: 一次設計の線形解析（Ex, Ey）の層間変形から
+  剛性率 Rs、柱の水平剛性 D（柱のせん断力 / 層間変位）から剛心・ねじり剛性・弾力半径・偏心率 Re
+
 部材荷重を Python から与える場合は `Model.add_member_load(case, eid, w, profile=[(x, 係数), ...])`
 で区分線形の分布を指定できます（x は i節点からの距離 [mm]）。
 
@@ -223,7 +263,7 @@ nonlinear:
 | 3 | 荷重の自動生成（床荷重の梁への分配、Ai分布による地震力、偏心） | 済 |
 | 4 | 断面算定（RC規準: 曲げ・せん断の許容応力度検定） | 済 |
 | 5 | 非線形解析（材端剛塑性ばね、トリリニア骨格曲線、荷重増分法） | 済 |
-| 6 | 保有水平耐力（Ds・Fes、崩壊形の判定） | 予定 |
+| 6 | 保有水平耐力（Ds・Fes、崩壊形の判定） | 済 |
 | 7 | 3D可視化・計算書出力 | 予定 |
 
 ## 既知の簡略化
@@ -239,3 +279,6 @@ nonlinear:
   梁の中央はスパン中央の値で検定（スパン内の最大正曲げ位置ではない）。梁の左右端部は同一配筋
 - 非線形解析: 曲げばねのみ（せん断破壊・せん断ばねは未考慮）、柱の変動軸力による My の変化と
   2方向曲げの相互作用は未考慮、P-Δ 効果なし、梁の My はスラブ筋の寄与を無視、Ze は鉄筋を無視
+- 保有水平耐力: 耐力壁のある建物（βu による Ds）は未対応。FD の部材を除いても崩壊形が保たれる場合の
+  扱いはせず、FD の柱があれば部材群 D（安全側）。局部崩壊形の判定はしない。
+  外力分布は Ai 分布で一定。偏心率の D 値は一次設計の Ex, Ey（重心のずれによるねじれを含む）から算定

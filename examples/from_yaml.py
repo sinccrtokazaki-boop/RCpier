@@ -6,7 +6,7 @@
 """
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from rcframe import Result, load_building, run_checks, run_pushover
+from rcframe import Result, load_building, run_checks, run_pushover, run_ultimate
 
 path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("two_story_frame.yaml")
 bld = load_building(path)
@@ -52,3 +52,10 @@ if bld.nonlinear["given"]:
         po = run_pushover(bld, d, res)
         po.print_curve(every=20)
         po.print_hinges()
+
+# ultimate の指定があれば保有水平耐力の確認
+if bld.ultimate["given"]:
+    rep = run_ultimate(bld)
+    rep.print_eccentricity()
+    rep.print_members()
+    rep.print_summary()

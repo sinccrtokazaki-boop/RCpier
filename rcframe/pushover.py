@@ -52,6 +52,9 @@ class PushoverResult:
     gravity_disp: dict = None                     # 長期荷重載荷後の節点変位
     warnings: list = field(default_factory=list)
     unconverged: list = field(default_factory=list)   # ばねの載荷・除荷の判定が整合しなかったステップ
+    mechanism_step: int = None                    # 崩壊機構が形成されたステップ（mechanism_check 時）
+    mechanism_stories: list = field(default_factory=list)   # 機構で変形が集中する層
+    states: dict = field(default_factory=dict)    # step -> (変位, {eid: 可撓部端の材端力})（keep_states 時）
 
     @property
     def lateral(self):
@@ -95,7 +98,8 @@ class PushoverResult:
 
 
 def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_drift,
-             labels=None, max_steps=20000):
+             labels=None, max_steps=20000, shear_caps=None, shear_labels=None,
+             mechanism_check=False, drift_marks=(), keep_states=False):
     """事象追跡型の荷重増分解析（入力形式に依存しない本体）
 
     hinges        : {(eid, 面, 端): Hinge}（端 0 = i端, 1 = j端）
@@ -103,8 +107,18 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
     pattern       : 水平外力 [(節点, F6)]（荷重係数 1 の値）
     levels        : [Level]（層間変形角の監視、下から）
     d             : 水平載荷の方向（0 = X, 1 = Y）
+    shear_caps    : {(eid, 面): Qsu}  水平載荷中に |Q| が Qsu に達したら「せん断破壊」の事象
+                    （面 0 = xy 面のせん断 Qy、面 1 = xz 面の Qz。以後その部材の判定はしない）
+    mechanism_check: 降伏したばねを解放（ピン）した接線剛性で水平外力に対して不安定になったら
+                    崩壊機構の形成とする（res.mechanism_step, res.mechanism_stories）
+    drift_marks   : ステップを必ず区切る層間変形角（例 Qu 判定用の 1/100）
+    keep_states   : 各ステップの変位・部材端力を res.states に保存
     戻り値: PushoverResult（final 以外。final は呼び出し側で設定）
     """
+    shear_caps = dict(shear_caps or {})
+    shear_labels = shear_labels or {k: str(k) for k in shear_caps}
+    sheared = set()
+    ref_rate = None                      # 水平載荷の最初のステップの層間変形角増分（機構判定の基準）
     labels = labels or {k: str(k) for k in hinges}
     idx, n = model._index()
     C, _ = model._constraint_matrix(idx, n)
@@ -200,11 +214,23 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                 dl = min(dl, 1.0 - lam[phase])
             else:
                 rmax = max(abs(r) for r in rate)
+                if ref_rate is None:
+                    ref_rate = rmax
                 if rmax > 0:
                     dl = min(dl, step_drift / rmax)
-                    for c, r in zip(cur, rate):          # |層間変形角| が上限に達するまで
+                    cmax = max(abs(c) for c in cur)
+                    marks = [mk for mk in drift_marks if mk > cmax * (1 + 1e-9)] + [max_drift]
+                    for c, r in zip(cur, rate):          # |層間変形角| が上限・通過点に達するまで
                         if r != 0 and r * c >= 0:
-                            dl = min(dl, max(0.0, max_drift - abs(c)) / abs(r))
+                            for mk in marks:
+                                dl = min(dl, max(0.0, mk - abs(c)) / abs(r))
+                for (eid, plane), cap in shear_caps.items():   # せん断力が Qsu に達するまで
+                    if (eid, plane) in sheared:
+                        continue
+                    for k in ((1, 7) if plane == 0 else (2, 8)):
+                        q, dq = face[eid][k], dface[eid][k]
+                        if dq != 0 and q * dq >= 0:
+                            dl = min(dl, max(0.0, cap - abs(q)) / abs(dq))
             if math.isinf(dl):
                 raise RuntimeError("荷重増分が定まりません（外力 0 または全ばねが無限遠）")
             zero_steps = zero_steps + 1 if dl == 0 else 0
@@ -230,8 +256,41 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                                phase=phase)
                     evs.append(rec)
                     res.events.append(rec)
+            if phase == "水平":
+                drift_now = max((abs(x) for x in dr), default=0.0)
+                for (eid, plane), cap in shear_caps.items():
+                    if (eid, plane) in sheared:
+                        continue
+                    q = max(abs(face[eid][k]) for k in ((1, 7) if plane == 0 else (2, 8)))
+                    if q >= cap * (1 - 1e-9):
+                        sheared.add((eid, plane))
+                        rec = dict(step=step, key=(eid, plane), label=shear_labels[(eid, plane)],
+                                   event="せん断破壊", side=0, lam=lam[phase], Q=Q, drift=drift_now,
+                                   phase=phase)
+                        evs.append(rec)
+                        res.events.append(rec)
+                if mechanism_check and res.mechanism_step is None and any(
+                        any(h.yielded.values()) for h in hinges.values()):
+                    rel = {}
+                    for key, h in hinges.items():
+                        flex, lim, kind = h.tangent(sigma[key])
+                        if kind == "post":                       # 降伏後の分岐 → 解放（ピン）
+                            flex = 1e6 / h.sk[sigma[key]].ks3
+                        rel[key] = (flex, lim, kind)
+                    try:
+                        mdu, _, _ = solve("水平", rel)
+                        mrate = [abs(x) for x in drifts(mdu)]
+                    except RuntimeError:
+                        mrate = [math.inf] * len(levels)
+                    if max(mrate) > 1e5 * ref_rate:
+                        res.mechanism_step = step
+                        top = max(mrate)
+                        res.mechanism_stories = [lv.name for lv, x in zip(levels, mrate)
+                                                 if x > 0.1 * top]
             res.steps.append(dict(step=step, phase=phase, lam=lam[phase], Q=Q, drifts=dr,
                                   events=evs))
+            if keep_states:
+                res.states[step] = (u.copy(), {eid: face[eid].copy() for eid in E})
             if phase == "長期" and lam[phase] >= 1.0 - 1e-12:
                 break
             if phase == "水平" and max(abs(x) for x in dr) >= max_drift * (1 - 1e-9):
@@ -307,11 +366,13 @@ def build_hinges(bld, rL, opts):
     return hinges, labels, warns
 
 
-def run_pushover(bld, direction="+x", results=None):
+def run_pushover(bld, direction="+x", results=None, max_drift=None, **kw):
     """Building のプッシュオーバー解析（direction: "+x", "-x", "+y", "-y"）
 
     長期荷重ケースは design.long（既定 G, P）、水平外力は Ai 分布の地震荷重ケース Ex / Ey。
     非線形の設定は YAML の nonlinear（sigma_y_factor, post_yield_ratio, pushover）。
+    kw は pushover() へ渡す（shear_caps, mechanism_check, drift_marks, keep_states など）。
+    shear_caps のキーは (eid, 面)。
     """
     name, sign, d, case = _parse_direction(direction)
     m = bld.model
@@ -339,8 +400,8 @@ def run_pushover(bld, direction="+x", results=None):
     pattern = [(nid, sign * np.asarray(F, float)) for nid, F in m.nodal_loads[case]]
     po_opt = opts["pushover"]
     try:
-        po = pushover(m, hinges, long, pattern, levels, d, po_opt["max_drift"], po_opt["step_drift"],
-                      labels)
+        po = pushover(m, hinges, long, pattern, levels, d, max_drift or po_opt["max_drift"],
+                      po_opt["step_drift"], labels, **kw)
         u, face, node, idx = po._state
         disp = {nid: u[6 * k:6 * k + 6].copy() for nid, k in idx.items()}
         forces = {eid: {"face": face[eid].copy(), "node": node[eid].copy()} for eid in face}

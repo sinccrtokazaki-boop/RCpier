@@ -75,7 +75,7 @@ class Building:
     TOP_KEYS = ("name", "materials", "sections", "defaults", "grids", "floors",
                 "columns", "beams", "openings", "loads",
                 "floor_loads", "floor_use", "self_weight", "extra_weights", "seismic",
-                "steels", "design", "nonlinear")
+                "steels", "design", "nonlinear", "ultimate")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -90,6 +90,7 @@ class Building:
         self.default_material = d.get("material")
         self._read_grids(data.get("grids"))
         self._read_floors(data.get("floors"))
+        self._read_ultimate(data.get("ultimate") or {})      # 階名を参照するので floors の後
 
         self.cols = {}       # (f, ix, iy) -> (RectSection, Concrete)
         self.beams = {}      # ("x", f, iy, ix) / ("y", f, ix, iy) -> (RectSection, Concrete)
@@ -213,6 +214,26 @@ class Building:
                 "max_drift": _num(p.get("max_drift", 0.02), "nonlinear.pushover.max_drift"),
                 "step_drift": _num(p.get("step_drift", 0.0002), "nonlinear.pushover.step_drift"),
             },
+        }
+
+    def _read_ultimate(self, d):
+        _check_keys(d, ("qsu", "qsu_factor", "drift_limit", "stop_at_column_shear", "ds_override"),
+                    "ultimate")
+        qsu = str(d.get("qsu", "min"))
+        if qsu not in ("min", "mean"):
+            raise InputError(f"ultimate.qsu: min または mean を指定してください: {qsu!r}")
+        ds = {}
+        for name, v in (d.get("ds_override") or {}).items():
+            if str(name) not in self.fi or self.fi[str(name)] == len(self.floors) - 1:
+                raise InputError(f"ultimate.ds_override: 層（最上階以外の階名）ではありません: {name!r}")
+            ds[str(name)] = _num(v, f"ultimate.ds_override.{name}")
+        self.ultimate = {
+            "given": bool(d),
+            "qsu": qsu,
+            "qsu_factor": _num(d.get("qsu_factor", 1.0), "ultimate.qsu_factor"),
+            "drift_limit": _num(d.get("drift_limit", 0.01), "ultimate.drift_limit"),
+            "stop_at_column_shear": bool(d.get("stop_at_column_shear", True)),
+            "ds_override": ds,
         }
 
     def _read_grids(self, grids):

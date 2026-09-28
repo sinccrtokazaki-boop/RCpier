@@ -78,3 +78,10 @@ nonlinear:                    # プッシュオーバー（材端ばね・事象
     directions: [+x, +y]
     max_drift: 0.02           # 層間変形角 1/50 で終了
     step_drift: 0.0002        # 1ステップの層間変形角増分の上限
+
+ultimate:                     # 保有水平耐力（令82条の3）
+  qsu: min                    # せん断終局強度: 荒川 min 式 / mean 式
+  qsu_factor: 1.0             # 曲げ破壊先行の条件 Qsu ≧ 係数·Qmu
+  drift_limit: 0.01           # Qu を決める層間変形角の上限（1/100）
+  stop_at_column_shear: true  # 柱のせん断破壊の時点で Qu を決める
+  ds_override: {}             # 例 {1F: 0.35}
