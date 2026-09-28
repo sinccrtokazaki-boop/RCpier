@@ -23,6 +23,10 @@ deck:
   top: 3.0                          # 上部工の天端
   model_level: 2.25                 # 骨組の節点の高さ（梁の中心）
   soffit: 1.5                       # 上部工の下面（杭頭の剛域の下端）
+  slab_thickness: 0.40              # 床版厚（自重の計算用）
+  overhang: {sea: 1.5, land: 0.0}   # 通り芯の外側への張出し
+
+unit_weight: {rc: 24.5}             # 鉄筋コンクリート [kN/m³]
 
 beams:
   - {at: "*", section: G1}          # 縦梁・横梁（建物編と同じ配置ルール）
@@ -36,7 +40,31 @@ piles:
   # overrides:
   #   - {at: "B1/S", section: none} # 杭なしの例
 
-loads:                              # P1 では手入力の荷重（P2 で自動生成）
+actions:                            # 荷重の自動生成（ケース名は固定）
+  D: {pavement: 2.0}                # 固定: 床版・梁の自重 + 舗装 [kN/m²]
+  L: {surcharge: 20.0}              # 上載荷重（常時）[kN/m²]
+  Ls: {surcharge: 10.0}             # 上載荷重（地震時）[kN/m²]
+  B:                                # 接岸力: 防舷材の位置 x [m]、中心の高さ z [m]、反力 R [kN]、摩擦係数
+    fenders:
+      - {x: 12.0, z: 0.5, R: 1500, friction: 0.25}
+      - {x: 30.0, z: 0.5, R: 1500, friction: 0.25}
+  T:                                # 牽引力: 係船柱の位置 x [m]、牽引力 P [kN]、水平角・仰角 [°]
+    bollards:
+      - {x: 3.0, P: 700, angle_h: 30, angle_v: 15}
+      - {x: 39.0, P: 700, angle_h: -30, angle_v: 15}
+  EQ: {kh: 0.15, kv: 0.0, directions: [x, y]}   # レベル1地震動（照査用震度）
+
+# 部分係数による組合せ。係数は見本の値で、港湾基準（2018）で要確認
+combinations:
+  永続_常時:   {state: 永続, factors: {D: 1.0, L: 1.0}}
+  変動_接岸:   {state: 変動, factors: {D: 1.0, L: 1.0, B: 1.0}}
+  変動_牽引:   {state: 変動, factors: {D: 1.0, L: 1.0, T: 1.0}}
+  L1地震_+X:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQx: 1.0}}
+  L1地震_-X:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQx: -1.0}}
+  L1地震_+Y:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQy: 1.0}}
+  L1地震_-Y:   {state: 変動, factors: {D: 1.0, Ls: 1.0, EQy: -1.0}}
+
+loads:                              # 手入力の荷重（P1 の確認用。actions と同名なら加算）
   H:                                # 上部工の図心に法線直角方向の水平力
     deck: [0, 1000, 0]
   W:                                # 梁に鉛直等分布荷重

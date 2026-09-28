@@ -275,7 +275,7 @@ write_report(load_building("input.yaml"), "report.html")
 | 段階 | 内容 | 状態 |
 |---|---|---|
 | P1 | 桟橋モデルの自動生成（上部工の梁、鋼管杭、仮想固定点）と線形解析 | 済 |
-| P2 | 荷重（自重・上載荷重・接岸力・牽引力・レベル1地震動）と部分係数による組合せ | 予定 |
+| P2 | 荷重（自重・上載荷重・接岸力・牽引力・レベル1地震動）と部分係数による組合せ | 済 |
 | P3 | 照査（上部工 RC、鋼管杭、杭の支持力） | 予定 |
 | P4 | レベル2地震動（プッシュオーバー） | 予定 |
 | P5 | 計算書（HTML） | 予定 |
@@ -303,7 +303,31 @@ pier.pile("B1", "L"); pier.beam("L", "B1", "B2"); pier.node("B1", "L"); pier.mas
 | `deck` | `{top, model_level, soffit}` | 上部工の天端・骨組の高さ（梁の中心）・下面 [m] |
 | `beams` | `[{at, section}]` | 縦梁・横梁の配置ルール（建物編と同じ位置指定） |
 | `piles` | `{section, rows: {列: {seabed, kh}}, overrides: [{at, section}]}` | 杭の断面、列ごとの海底面 [m] と kh [kN/m³]、個別の上書き（none で杭なし） |
-| `loads` | `{ケース: {deck: [Fx, Fy, Mz], beams: [{at, w}], nodes: [{at, F}]}}` | 手入力の荷重（上部工の図心・梁の等分布・節点） |
+| `loads` | `{ケース: {deck: [Fx, Fy, Mz], beams: [{at, w}], nodes: [{at, F}]}}` | 手入力の荷重（上部工の図心・梁の等分布・節点）。actions と同名なら加算 |
+| `deck.slab_thickness`, `deck.overhang` | m、`{sea, land}` m | 床版厚（自重用）、通り芯の外側への張出し |
+| `unit_weight` | `{rc}` kN/m³ | 鉄筋コンクリートの単位体積重量（既定 24.5） |
+| `actions` | 下記 | 荷重の自動生成 |
+| `combinations` | `{名前: {state: 永続/変動/偶発, factors: {ケース: 係数}}}` | 部分係数による組合せ（係数は入力。逆方向は負の係数） |
+
+**荷重の自動生成（actions）**: ケース名は固定。座標は X = 法線方向、Y = 陸側 → 海側（海側が +Y）
+
+| ケース | 入力 | 生成方法 |
+|---|---|---|
+| `D` | `{pavement}` kN/m² | 床版（γ·t）と舗装を面荷重として梁へ（区画は亀甲分割、張出しは端の梁へ線荷重）、梁は床版より下の部分 γ·b·(D − t) |
+| `L`, `Ls` | `{surcharge}` kN/m² | 上載荷重（常時・地震時）を D と同様に分配 |
+| `B` | `{fenders: [{x, z, R, friction}]}` | 海側前面・高さ z の防舷材に反力 R（−Y）と摩擦 μR（+X、負の μ で −X）。海側の梁の両端節点へてこの原理で配分し、偏心のモーメント r × F を加える |
+| `T` | `{bollards: [{x, P, angle_h, angle_v}]}` | 海側前面・天端の係船柱に牽引力（+Y 向き、法線直角から +X 側への水平角、仰角）。B と同様に節点へ |
+| `EQx`, `EQy`（`EQz`） | `EQ: {kh, kv, directions}` | レベル1地震動（震度法）。kh ×（D + Ls）を上部工の重心に作用（剛床の図心とのずれの Mz）。kv > 0 なら EQz = kv ×（D + Ls の荷重） |
+
+```python
+res = pier.analyze_cases()                 # {ケース: Result}
+comb = pier.analyze_combinations(res)      # {組合せ名: Result}
+pier.weights, pier.seismic                 # 重量と重心、地震用重量
+```
+
+**P2 の簡略化**: 張出し部の荷重は端の梁への線荷重（ねじりは無視）。防舷材・係船柱の力は海側の梁の両端節点へ
+てこの原理で配分（梁の局所的な曲げの影響は無視）。杭の慣性力・付加質量、車両・荷役機械の集中荷重の自動生成は
+扱わない（集中荷重は loads の nodes / beams で入力）
 
 **モデル化**
 - 上部工: 縦梁・横梁の格子を model_level に配置し、上部工全体を 1つの剛床（マスター節点は平面の図心）

@@ -20,8 +20,33 @@ for (i, j), p in sorted(pier.piles.items(), key=lambda kv: (kv[0][1], kv[0][0]))
           f"{1 / p['beta'] / 1e3:7.2f} {p['z_fix'] / 1e3:9.2f} {p['length'] / 1e3:8.2f} "
           f"{p['free_length'] / 1e3:9.2f}")
 
-for case in sorted(set(m.nodal_loads) | set(m.member_loads)):
-    r = m.analyze(case)
+if pier.weights:
+    print("\n=== 重量と重心 ===")
+    for k, (W, xg, yg) in pier.weights.items():
+        print(f"{k:<4} W = {W / 1e3:9.1f} kN  重心 ({xg / 1e3:.2f}, {yg / 1e3:.2f}) m")
+if pier.seismic:
+    s = pier.seismic
+    print(f"レベル1地震動: kh = {s['kh']:g}, kv = {s['kv']:g}, 慣性力 kh·W = {s['kh'] * s['W'] / 1e3:.1f} kN")
+
+res = pier.analyze_cases()
+if pier.combinations:
+    print("\n=== 荷重の組合せ（部分係数は YAML の値。港湾基準で要確認） ===")
+    print(f"{'組合せ':<12} {'状態':<3} {'ux[mm]':>7} {'uy[mm]':>7} {'杭の最大圧縮[kN]':>15} {'最大引張[kN]':>11} "
+          f"{'杭頭の最大曲げ[kN·m]':>18}")
+    for name, r in pier.analyze_combinations(res).items():
+        d = r.disp[pier.master()]
+        Ns, Ms = [], []
+        for p in pier.piles.values():
+            si, sj = r.section_forces(p["eid"], "face")
+            Ns.append(sj[0])
+            Ms.append(max(abs(sj[4]), abs(sj[5])))
+        print(f"{name:<12} {pier.combinations[name]['state']:<4} {d[0]:7.2f} {d[1]:7.2f} "
+              f"{-min(Ns) / 1e3:15.1f} {max(max(Ns), 0) / 1e3:11.1f} {max(Ms) / 1e6:18.1f}")
+
+for case in ("H", "W"):
+    if case not in res:
+        continue
+    r = res[case]
     print(f"\n=== 荷重ケース {case} ===")
     if pier.master() is not None:
         d = r.disp[pier.master()]

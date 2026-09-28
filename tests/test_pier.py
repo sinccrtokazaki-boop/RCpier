@@ -89,6 +89,8 @@ def test_single_pile_fixed_head_stiffness():
 def _small_pier():
     """梁を十分剛にした 2×2 の桟橋（陸側・海側で杭長が異なる）"""
     d = _data()
+    for k in ("actions", "combinations"):          # P2 の荷重生成は使わない（防舷材の位置が範囲外になる）
+        d.pop(k, None)
     d["grids"] = {"x": {"B1": 0, "B2": 6}, "y": {"L": 0, "S": 7}}
     d["sections"]["GR"] = {"b": 6000, "D": 6000, "material": "C24"}
     d["beams"] = [{"at": "*", "section": "GR"}]
