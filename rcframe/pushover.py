@@ -116,6 +116,9 @@ class Incremental:
     node_springs  : {(節点, 自由度): EPSpring}  非線形の節点ばね（地盤ばね）。各ステップの接線剛性を
                     model.node_springs[節点][自由度] に設定する（呼び出し側で元の値に戻すこと）
     lateral_total : 基準の水平外力パターンの d 方向の合計（ベースシア Q = 正味の荷重係数 × これ）
+
+    地盤変位（run の ground）: 節点ばね（model.node_springs、地盤ばね）の地盤側の端に強制変位 ug を与える。
+    ばねの力 = k·(u − ug)。剛性方程式では等価節点力 k·Δug として右辺に加える（側方流動）
     """
 
     def __init__(self, model, hinges, levels, d, labels=None, max_steps=20000, shear_caps=None,
@@ -139,6 +142,7 @@ class Incremental:
             self.by_elem[key[0]].append(key)
         self.sigma = {key: 1 for key in hinges}
         self.u = np.zeros(self.n)
+        self.ug = np.zeros(self.n)           # 節点ばねの地盤側の変位（地盤変位、u と同じ自由度番号）
         self.face = {eid: np.zeros(12) for eid in E}
         self.node = {eid: np.zeros(12) for eid in E}
         self.res = PushoverResult("", hinges=hinges, labels=self.labels, levels=levels)
@@ -165,7 +169,7 @@ class Incremental:
             out.append((vec[6 * self.idx[lv.upper] + self.d] - lo) / lv.h)
         return out
 
-    _SNAP = ("u", "face", "node", "hinges", "ns", "sigma", "ns_sigma", "sheared", "ref_rate", "res",
+    _SNAP = ("u", "ug", "face", "node", "hinges", "ns", "sigma", "ns_sigma", "sheared", "ref_rate", "res",
              "lam_lat", "step", "zero_steps")
 
     def snapshot(self):
@@ -185,7 +189,7 @@ class Incremental:
         self.res.inc = self
 
     # ------------------------------------------------------------ 求解
-    def _solve(self, cases, pattern, sign, tang):
+    def _solve(self, cases, pattern, sign, tang, ground=()):
         m, E, idx, n = self.model, self.model.elements, self.idx, self.n
         for eid, keys in self.by_elem.items():
             fs = np.zeros((2, 2))
@@ -207,6 +211,10 @@ class Incremental:
                 eloads[eid] = (a + sign * pf, b + sign * pr)
         for nid, f in pattern:
             F[6 * idx[nid]:6 * idx[nid] + 6] += sign * np.asarray(f, float)
+        dug = np.zeros(n)
+        for nid, dof, v in ground:                # 地盤変位: 等価節点力 k·Δug（k は現在の接線剛性）
+            dug[6 * idx[nid] + dof] = sign * v
+            F[6 * idx[nid] + dof] += m.node_springs[nid][dof] * sign * v
         ur = spla.spsolve((self.C.T @ K @ self.C).tocsc(), self.C.T @ F)
         if not np.all(np.isfinite(ur)):
             raise RuntimeError("剛性マトリクスが特異です（崩壊機構の形成または拘束不足）")
@@ -221,11 +229,11 @@ class Incremental:
             else:
                 dface[eid] = e.k_flex @ (e.H @ (e.T @ dg))
                 dnode[eid] = e.H.T @ dface[eid]
-        return du, dface, dnode
+        return du, dface, dnode, dug
 
     # ------------------------------------------------------------ 載荷
     def run(self, phase, cases=(), pattern=(), sign=1.0, lam_target=None, max_drift=None, step_drift=None,
-            drift_marks=(), disp_target=None, lateral=False, checks=None):
+            drift_marks=(), disp_target=None, lateral=False, checks=None, ground=()):
         """荷重（cases の節点・部材荷重 + pattern の節点荷重、いずれも × sign）を荷重係数 0 から増やす
 
         停止条件（いずれか、到達でステップを区切って終了）:
@@ -235,11 +243,16 @@ class Incremental:
         step_drift  : 1ステップの層間変形角増分の上限、drift_marks: 必ずステップを区切る層間変形角
         lateral     : 基準の水平外力の載荷（正味の荷重係数とベースシアを更新）
         checks      : せん断破壊・崩壊機構の判定を行う（省略時は lateral と同じ）
+        ground      : [(節点, 自由度, 地盤変位)]  荷重係数 1 あたりの地盤変位（× sign）。節点ばねが必要
         戻り値: この載荷の最終の荷重係数
         """
         if lam_target is None and max_drift is None and disp_target is None:
             raise ValueError("停止条件（lam_target, max_drift, disp_target）を指定してください")
         checks = lateral if checks is None else checks
+        ground = list(ground)
+        for nid, dof, _ in ground:
+            if nid not in self.model.node_springs:
+                raise ValueError(f"地盤変位を与える節点 {nid} に節点ばねがありません")
         m, E, hinges, ns, res = self.model, self.model.elements, self.hinges, self.ns, self.res
         lam = 0.0
         while True:
@@ -251,9 +264,9 @@ class Incremental:
                 ntang = {key: ns[key].tangent(self.ns_sigma[key]) for key in ns}
                 for (nid, dof), t in ntang.items():
                     m.node_springs[nid][dof] = t[0]
-                du, dface, dnode = self._solve(cases, pattern, sign, tang)
+                du, dface, dnode, dug = self._solve(cases, pattern, sign, tang, ground)
                 dm = {key: spring_moment(dface[key[0]], key[1], key[2]) for key in hinges}
-                dF = {key: ntang[key][0] * du[6 * self.idx[key[0]] + key[1]] for key in ns}
+                dF = {key: ntang[key][0] * (du - dug)[6 * self.idx[key[0]] + key[1]] for key in ns}
                 scale = max((abs(v) for v in dm.values()), default=0.0)
                 fscale = max((abs(v) for v in dF.values()), default=0.0)
                 changed = False
@@ -329,6 +342,7 @@ class Incremental:
                 raise RuntimeError("荷重増分 0 のステップが続いています（事象の判定が収束しません）")
             # ---- 状態の更新
             self.u += dl * du
+            self.ug += dl * dug
             for eid in E:
                 self.face[eid] += dl * dface[eid]
                 self.node[eid] += dl * dnode[eid]
@@ -377,7 +391,7 @@ class Incremental:
                             flex = 1e6 / h.sk[self.sigma[key]].ks3
                         rel[key] = (flex, lim, kind)
                     try:
-                        mdu, _, _ = self._solve(cases, pattern, sign, rel)
+                        mdu, _, _, _ = self._solve(cases, pattern, sign, rel, ground)
                         mrate = [abs(x) for x in self.drifts(mdu)]
                     except RuntimeError:
                         mrate = [math.inf] * len(self.levels)

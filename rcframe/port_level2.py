@@ -125,6 +125,17 @@ def build_pile_hinges(pier, rG, plane, r, depth_factor):
     return hinges, labels, kinds, warns
 
 
+def inertia_pattern(pier, d, sign):
+    """上部工の重心に作用する水平力 W（荷重係数 1 = 換算震度 1）を剛床のマスター節点へ移した節点力。
+    戻り値: ([(マスター節点, 6成分)], W)"""
+    W, xg, yg = pier.weights["地震用"]
+    mst = pier.model.nodes[pier.master()]
+    F = np.zeros(6)
+    F[d] = sign * W
+    F[5] = sign * ((xg - mst.x) * W if d == 1 else -(yg - mst.y) * W)   # 重心の偏心によるねじり
+    return [(pier.master(), F)], W
+
+
 def run_level2(pier, direction="+y", results=None):
     """レベル2地震動のプッシュオーバーと判定（direction: +x, -x, +y, -y）"""
     opt = pier.level2
@@ -133,8 +144,7 @@ def run_level2(pier, direction="+y", results=None):
     m = pier.model
     if "地震用" not in pier.weights or pier.master() is None:
         raise ValueError("レベル2: 地震用重量（actions の D, Ls）と上部工の剛床が必要です")
-    W, xg, yg = pier.weights["地震用"]
-    mst = m.nodes[pier.master()]
+    pattern, W = inertia_pattern(pier, d, sign)
     res = dict(results or {})
     gcases = list(opt["gravity"])
     for c in gcases:
@@ -151,10 +161,6 @@ def run_level2(pier, direction="+y", results=None):
                 if cap:
                     ns[(nid, d)] = EPSpring(k, cap)
                     nlabels[(nid, d)] = f"地盤 {pier.gx[i][0]}/{pier.gy[j][0]} z={z / 1e3:.2f}"
-    F = np.zeros(6)
-    F[d] = sign * W
-    F[5] = sign * ((xg - mst.x) * W if d == 1 else -(yg - mst.y) * W)
-    pattern = [(pier.master(), F)]
     levels = [Level("上部工", None, pier.master(), 1.0)]      # 「層間変形角」= 上部工の変位 [mm]
     marks = (opt["target_displacement"],) if opt["target_displacement"] else ()
     saved = {nid: k.copy() for nid, k in m.node_springs.items()}

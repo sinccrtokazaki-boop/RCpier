@@ -418,7 +418,7 @@ r = run_level2(pier, "+y")        # r.print(), r.ok, r.curve, r.demand, r.criter
 | 段階 | 内容 | 状態 |
 |---|---|---|
 | U1 | 除荷・状態の引き継ぎ・変位制御（残留変位、被災後の利用荷重） | 済 |
-| U2 | 地盤変位の入力（側方流動による地盤ばねの強制変位） | 未 |
+| U2 | 地盤変位の入力（側方流動による地盤ばねの強制変位） | 済 |
 | U3 | 鋼管杭のファイバーモデルによる M–φ（局部座屈ひずみ εcu） | 未 |
 | U4 | 一括実行（仮想固定点モデルでのふるい分け → 地盤ばねモデルで詳細化） | 未 |
 | U5 | 許容荷重と超過確率 | 未 |
@@ -439,6 +439,32 @@ rows = residual_table(inc, [(nid, P)], peaks=[0.005, 0.01])    # 最大点ごと
 - `snapshot()` / `restore()` で状態を保存・復元する（1本の載荷経路から複数の最大点の残留値を得る）
 - 除荷では材端ばねは剛なので部材は弾性的に戻り、残留変位 = δmax − Pmax/K（弾性）。テストで照合
 - 従来の `pushover(...)` は Incremental の薄い包みで、結果は変わらない
+
+**U2: 側方流動（rcframe/port_flow.py）**
+```yaml
+lateral_flow:                       # 地盤ばねモデル（piles.model: soil_spring）が必要
+  流動_海側1m:
+    direction: +y
+    surface: {L: 1.0, M: 0.8, S: 0.6}   # 海底面の地盤変位 ug0 [m]（列ごと、または全列共通の値）
+    depth: 8.0                      # 流動する層の厚さ H [m]
+    shape: cos                      # cos / linear / uniform
+    kh_factor: 0.1                  # 流動層の地盤ばね剛性の低減係数（pu_factor: 上限の低減係数）
+    kh: 0.15                        # 慣性力の換算震度（0 なら地盤変位のみ、負は逆向き）
+    order: simultaneous             # simultaneous / ground_first / inertia_first
+    unload: true                    # 最後に慣性力を除荷
+```
+```python
+for case in pier.lateral_flow:
+    r = run_flow(pier, case)        # r.print(), r.deck（peak / residual）, r.yielded, r.max_rotation("地中部")
+```
+- 地盤ばねの地盤側の端に強制変位 ug(ζ) を与える。ばねの力 = k·(u杭 − ug)、剛性方程式では等価節点力 k·Δug
+  （`Incremental.run(ground=[(節点, 自由度, ug)])`）。上限 pu があれば杭に作用する力は pu·D·負担長 で頭打ち
+- 分布: cos ug0·cos(πζ/2H)、linear ug0(1 − ζ/H)、uniform ug0（ζ: 海底面からの深さ、ζ > H で 0）
+- 地中部の塑性ヒンジは全ての分割点に置く（流動層の下端付近の全塑性を捉えるため）
+- 打ち切り: 上部工の変位が level2.max_displacement（地盤変位を含む段階は + 地盤変位の最大値）に達したら止める
+- 出力: 上部工の最大・残留変位と平面の残留回転、杭頭・地中部の塑性回転角（最大・残留）、地盤ばねの降伏
+- テスト: 自由な杭の剛体移動、杭頭固定の杭（Chang の解 H = 4EIβ³·ug、M0 = H/2β）、両端固定の杭に地盤反力の上限が
+  作用する場合の端モーメント、地盤変位 0 で P4 と一致、弾性範囲で載荷順序によらない、上部工の水平方向の釣合い
 
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。

@@ -4,7 +4,7 @@
 """
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from rcframe import load_model, run_level2, run_pier_checks
+from rcframe import load_model, run_flow, run_level2, run_pier_checks
 
 path = sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).with_name("pier_example.yaml")
 pier = load_model(path)
@@ -54,6 +54,9 @@ if pier.combinations and pier.checks["given"]:
 if pier.level2["given"]:
     for d in pier.level2["directions"]:
         run_level2(pier, d, res).print()
+
+for case in getattr(pier, "lateral_flow", []):          # 側方流動のシナリオ（U2）
+    run_flow(pier, case, res).print()
 
 for case in ("H", "W"):
     if case not in res:

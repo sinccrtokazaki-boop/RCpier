@@ -39,7 +39,8 @@ class Pier(GridMixin):
     杭ごとの仮想固定点などは self.piles[(ix, iy)]（dict）に入る。
     """
     TOP_KEYS = ("type", "name", "materials", "sections", "grids", "deck", "beams", "piles",
-                "loads", "report", "unit_weight", "actions", "combinations", "checks", "level2")
+                "loads", "report", "unit_weight", "actions", "combinations", "checks", "level2",
+                "lateral_flow")
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -77,6 +78,8 @@ class Pier(GridMixin):
         self._read_combinations(data.get("combinations") or {})
         self._read_checks(data.get("checks") or {})
         self._read_level2(data.get("level2") or {})
+        from .port_flow import read_flow_cases          # 側方流動のシナリオ（U2）
+        self.lateral_flow = read_flow_cases(self, data.get("lateral_flow"))
 
     # ============================================================ 読み込み
     def _read_materials(self, mats):

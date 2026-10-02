@@ -75,3 +75,15 @@ level2:
     - no_mechanism                  # 要求点までに崩壊機構ができない
     - no_inground_plastic           # 地中部が全塑性に達しない
     - {pile_rotation: 0.02}         # 杭頭の塑性回転角 [rad]
+
+# 側方流動のシナリオ（利用可否 U2）。地盤変位の分布・低減係数・載荷順序は入力（FLIP 等の結果または基準で要確認）
+lateral_flow:
+  流動_海側1m:
+    direction: +y                   # 流動の向き（海側）
+    surface: {L: 1.0, M: 0.8, S: 0.6}   # 海底面の地盤変位 [m]（杭の列ごと、または全列共通の値）
+    depth: 8.0                      # 流動する層の厚さ [m]（海底面から）
+    shape: cos                      # cos / linear / uniform
+    kh_factor: 0.1                  # 流動層の地盤ばね剛性の低減係数（液状化）
+    kh: 0.15                        # 同時に作用させる慣性力の換算震度（0 なら地盤変位のみ）
+    order: simultaneous             # simultaneous / ground_first / inertia_first
+    unload: true                    # 最後に慣性力を除荷して残留変位を求める

@@ -159,6 +159,7 @@ def test_soil_yield_events():
     d["piles"]["rows"] = {"L": {"seabed": -4.0, "kh": 20000, "tip": -20.0, "pu": 150},
                           "S": {"seabed": -8.0, "kh": 20000, "tip": -24.0, "pu": 150}}
     d.pop("combinations")
+    d.pop("lateral_flow", None)                    # 列 M を削除したので側方流動のシナリオも外す
     d["actions"]["EQ"]["directions"] = ["y"]
     d["level2"].update(kh=0.3, max_displacement=0.3, step=0.01, criteria=["no_mechanism"])
     p = Pier(d)
