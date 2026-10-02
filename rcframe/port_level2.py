@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .hinge import EPSpring, Hinge
+from .hinge import BilinearHinge, EPSpring
 from .port_check import jsce_mu
 from .pushover import Level, _parse_direction, pushover
 from .results import Result
@@ -119,7 +119,7 @@ def build_pile_hinges(pier, rG, plane, r, depth_factor):
                 Mp = 1e-3 * pipe_mp(sec, mat.fy, 0.0)
             sk = Skeleton.from_member(Mp, Mp, 0.5, K0, r)
             key = (eid, plane, end)
-            hinges[key] = Hinge(sk, sk)
+            hinges[key] = BilinearHinge(sk)              # 鋼材: 移動硬化（除荷は 2Mp の幅で弾性）
             labels[key] = f"杭 {tag} {where}"
             kinds[key] = kind
     return hinges, labels, kinds, warns

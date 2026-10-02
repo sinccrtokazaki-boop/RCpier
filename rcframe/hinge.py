@@ -81,6 +81,48 @@ class Hinge:
         return "弾性"
 
 
+class BilinearHinge:
+    """鋼材の材端ばね: 剛塑性 + 線形硬化（移動硬化、バイリニア型の履歴）
+
+    降伏線 M = ±My + ks3·θ（skeleton の My, ks3）。降伏線の間（|M − ks3·θ| < My）ではばね剛
+    （部材は弾性的に応答）。除荷すると 2My の幅を剛のまま戻り、反対側の降伏線に達すると再降伏する。
+    単調載荷では Hinge（バイリニア骨格 Mc = My）と同じ経路。Hinge と同じ使い方（tangent / advance）
+    """
+
+    def __init__(self, sk):
+        if sk.theta_y != 0:
+            raise ValueError("BilinearHinge は Mc = My のバイリニア骨格（Skeleton.from_member(Mp, Mp, ...)）です")
+        self.sk = {1: sk, -1: sk}
+        self.My, self.ks3 = sk.My, sk.ks3
+        self.theta = 0.0
+        self.M = 0.0
+        self.cracked = {1: False, -1: False}
+        self.yielded = {1: False, -1: False}
+        self.tolM = 1e-9 * sk.My
+
+    def tangent(self, sigma):
+        back = self.ks3 * self.theta                         # 降伏線の中心（移動硬化）
+        if sigma * (self.M - back) >= self.My - self.tolM:
+            return 1.0 / self.ks3, sigma * math.inf, "post"
+        return 0.0, back + sigma * self.My, "elastic"
+
+    def advance(self, dM, flex, sigma, hit=False, limit=None, kind=None):
+        self.theta += flex * dM
+        self.M += dM
+        if hit:
+            self.M = limit
+        events = []
+        if not self.yielded[sigma] and sigma * (self.M - self.ks3 * self.theta) >= self.My - self.tolM:
+            self.yielded[sigma] = True
+            self.cracked[sigma] = True
+            events.append("降伏")
+        return events
+
+    @property
+    def state(self):
+        return "降伏" if any(self.yielded.values()) else "弾性"
+
+
 class EPSpring:
     """節点の並進ばね（地盤ばね）の弾完全塑性モデル（上限 cap、降伏後は r·k の微小剛性）
 

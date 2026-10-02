@@ -22,8 +22,10 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - `rcframe/design.py`    : RC規準 2018 の許容応力度・許容曲げモーメント Ma(N)・許容せん断力（計算のみ）
 - `rcframe/check.py`     : 荷重組合せと全部材の検定（run_checks → CheckReport）
 - `rcframe/skeleton.py`  : 材端ばねの骨格曲線（Mc, My, 菅野式 αy、技術基準解説書 付録1-3）
-- `rcframe/hinge.py`     : ばねの履歴則（最大点指向型、除荷剛）。接線柔性と次の事象を返す
+- `rcframe/hinge.py`     : ばねの履歴則（RC: 最大点指向型 Hinge、鋼: 移動硬化 BilinearHinge、地盤: EPSpring）。
+  いずれも除荷剛で、接線柔性と次の事象を返す
 - `rcframe/pushover.py`  : 事象追跡型の荷重増分解析（本体 pushover は入力形式に非依存、run_pushover は Building 用）
+  - 本体は Incremental（run / unload / snapshot / restore、状態を呼び出しの間で保つ）。pushover はその包み
   - ばねは Element.springs（柔性 [面][端]）で element.py の local_stiffness_springs に渡す。解析後は None に戻す
 - `rcframe/ultimate.py`  : 荒川式 Qsu、部材種別・部材群・Ds、剛性率・偏心率・Fs・Fe（計算のみ）
 - `rcframe/capacity.py`  : 保有水平耐力の確認（run_ultimate → UltimateReport）、剛性率・偏心率（stiffness_eccentricity）
@@ -71,6 +73,10 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 ## 桟橋編のロードマップ（README.md 参照）
 基準: 港湾基準（2018）、コンクリート標準示方書（2022）。部分係数はプログラムに組み込まず YAML で入力する
 P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P3 済: 照査 → P4 済: レベル2（地盤ばね・プッシュオーバー）→ P5 済: 計算書（HTML）
+
+## 利用可否シナリオのロードマップ（README.md 参照、直杭式横桟橋のみ、各段階はユーザー承認後に着手）
+U1 済: 除荷・状態の引き継ぎ・変位制御 → U2: 地盤変位入力（側方流動）→ U3: ファイバー M–φ
+→ U4: 一括実行（2段階）→ U5: 許容荷重・超過確率 → U6: 判定カード（HTML）
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用

@@ -8,6 +8,7 @@
 ばねの向き（載荷・除荷）は、仮定した向きで解いたモーメント増分の符号と一致するまで繰り返す。
 P-Δ 効果、せん断破壊、2方向曲げの相互作用は考慮しない。
 """
+import copy
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -98,78 +99,121 @@ class PushoverResult:
             print(f"  [注意] {w}")
 
 
-def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_drift,
-             labels=None, max_steps=20000, shear_caps=None, shear_labels=None,
-             mechanism_check=False, drift_marks=(), keep_states=False,
-             node_springs=None, node_labels=None):
-    """事象追跡型の荷重増分解析（入力形式に依存しない本体）
+class Incremental:
+    """事象追跡型の荷重増分解析の状態と載荷（入力形式に依存しない本体）
+
+    状態（変位・部材端力・材端ばね・節点ばね）を保持し、run() で指定の荷重を指定の停止条件まで
+    載せる。続けて別の荷重（除荷・再載荷・利用荷重など）を載せられ、snapshot() / restore() で
+    状態を保存・復元できる。
 
     hinges        : {(eid, 面, 端): Hinge}（端 0 = i端, 1 = j端）
-    gravity_cases : 長期荷重のケース名のリスト（節点荷重・部材荷重）
-    pattern       : 水平外力 [(節点, F6)]（荷重係数 1 の値）
     levels        : [Level]（層間変形角の監視、下から）
-    d             : 水平載荷の方向（0 = X, 1 = Y）
+    d             : 水平方向（0 = X, 1 = Y）。層間変形角とベースシアの方向
     shear_caps    : {(eid, 面): Qsu}  水平載荷中に |Q| が Qsu に達したら「せん断破壊」の事象
-                    （面 0 = xy 面のせん断 Qy、面 1 = xz 面の Qz。以後その部材の判定はしない）
     mechanism_check: 降伏したばねを解放（ピン）した接線剛性で水平外力に対して不安定になったら
                     崩壊機構の形成とする（res.mechanism_step, res.mechanism_stories）
-    drift_marks   : ステップを必ず区切る層間変形角（例 Qu 判定用の 1/100）
     keep_states   : 各ステップの変位・部材端力を res.states、ばねの回転角を res.hinge_theta に保存
     node_springs  : {(節点, 自由度): EPSpring}  非線形の節点ばね（地盤ばね）。各ステップの接線剛性を
                     model.node_springs[節点][自由度] に設定する（呼び出し側で元の値に戻すこと）
-    戻り値: PushoverResult（final 以外。final は呼び出し側で設定）
+    lateral_total : 基準の水平外力パターンの d 方向の合計（ベースシア Q = 正味の荷重係数 × これ）
     """
-    ns = dict(node_springs or {})
-    ns_labels = node_labels or {k: str(k) for k in ns}
-    ns_sigma = {k: 1 for k in ns}
-    shear_caps = dict(shear_caps or {})
-    shear_labels = shear_labels or {k: str(k) for k in shear_caps}
-    sheared = set()
-    ref_rate = None                      # 水平載荷の最初のステップの層間変形角増分（機構判定の基準）
-    labels = labels or {k: str(k) for k in hinges}
-    idx, n = model._index()
-    C, _ = model._constraint_matrix(idx, n)
-    E = model.elements
-    by_elem = defaultdict(list)
-    for key in hinges:
-        by_elem[key[0]].append(key)
-    sigma = {key: 1 for key in hinges}
-    u = np.zeros(n)
-    face = {eid: np.zeros(12) for eid in E}
-    node = {eid: np.zeros(12) for eid in E}
-    res = PushoverResult("", hinges=hinges, labels=labels, levels=levels)
-    lat_total = sum(F[d] for _, F in pattern)
-    edofs = {eid: np.r_[6 * idx[e.ni] + np.arange(6), 6 * idx[e.nj] + np.arange(6)] for eid, e in E.items()}
 
-    def solve(phase, tang):
-        for eid, keys in by_elem.items():
+    def __init__(self, model, hinges, levels, d, labels=None, max_steps=20000, shear_caps=None,
+                 shear_labels=None, mechanism_check=False, keep_states=False, node_springs=None,
+                 node_labels=None, lateral_total=0.0):
+        self.model, self.hinges, self.levels, self.d = model, hinges, levels, d
+        self.ns = dict(node_springs or {})
+        self.ns_labels = node_labels or {k: str(k) for k in self.ns}
+        self.ns_sigma = {k: 1 for k in self.ns}
+        self.shear_caps = dict(shear_caps or {})
+        self.shear_labels = shear_labels or {k: str(k) for k in self.shear_caps}
+        self.sheared = set()
+        self.ref_rate = None                 # 水平載荷の最初のステップの層間変形角増分（機構判定の基準）
+        self.labels = labels or {k: str(k) for k in hinges}
+        self.mechanism_check, self.keep_states, self.max_steps = mechanism_check, keep_states, max_steps
+        self.idx, self.n = model._index()
+        self.C, _ = model._constraint_matrix(self.idx, self.n)
+        E = model.elements
+        self.by_elem = defaultdict(list)
+        for key in hinges:
+            self.by_elem[key[0]].append(key)
+        self.sigma = {key: 1 for key in hinges}
+        self.u = np.zeros(self.n)
+        self.face = {eid: np.zeros(12) for eid in E}
+        self.node = {eid: np.zeros(12) for eid in E}
+        self.res = PushoverResult("", hinges=hinges, labels=self.labels, levels=levels)
+        self.lat_total = lateral_total
+        self.lam_lat = 0.0                   # 基準の水平外力の正味の荷重係数
+        self.step = 0
+        self.zero_steps = 0
+        self.edofs = {eid: np.r_[6 * self.idx[e.ni] + np.arange(6), 6 * self.idx[e.nj] + np.arange(6)]
+                      for eid, e in E.items()}
+
+    # ------------------------------------------------------------ 状態
+    @property
+    def state(self):
+        return self.u, self.face, self.node, self.idx
+
+    def disp(self, nid, dof):
+        return self.u[6 * self.idx[nid] + dof]
+
+    def drifts(self, vec=None):
+        vec = self.u if vec is None else vec
+        out = []
+        for lv in self.levels:
+            lo = vec[6 * self.idx[lv.lower] + self.d] if lv.lower is not None else 0.0
+            out.append((vec[6 * self.idx[lv.upper] + self.d] - lo) / lv.h)
+        return out
+
+    _SNAP = ("u", "face", "node", "hinges", "ns", "sigma", "ns_sigma", "sheared", "ref_rate", "res",
+             "lam_lat", "step", "zero_steps")
+
+    def snapshot(self):
+        """現在の状態の複製（restore で戻す）。結果の履歴も含む（モデル本体は含まない）"""
+        inc_ref = self.res.__dict__.pop("inc", None)      # res.inc（自分自身）は複製しない
+        try:
+            return copy.deepcopy({k: getattr(self, k) for k in self._SNAP})
+        finally:
+            if inc_ref is not None:
+                self.res.inc = inc_ref
+
+    def restore(self, snap):
+        snap = copy.deepcopy(snap)
+        for k in self._SNAP:
+            setattr(self, k, snap[k])
+        self.res.hinges = self.hinges
+        self.res.inc = self
+
+    # ------------------------------------------------------------ 求解
+    def _solve(self, cases, pattern, sign, tang):
+        m, E, idx, n = self.model, self.model.elements, self.idx, self.n
+        for eid, keys in self.by_elem.items():
             fs = np.zeros((2, 2))
             for key in keys:
                 fs[key[1], key[2]] = tang[key][0]
             E[eid].springs = fs
-        K, _, _ = model.assemble_K()
+        K, _, _ = m.assemble_K()
         F = np.zeros(n)
-        eloads = defaultdict(lambda: (np.zeros(12), np.zeros(12)))
-        if phase == "長期":
-            for case in gravity_cases:
-                for nid, f in model.nodal_loads.get(case, []):
-                    F[6 * idx[nid]:6 * idx[nid] + 6] += f
-                for eid, (pf, pr) in model._element_loads(case).items():
-                    e = E[eid]
-                    F[6 * idx[e.ni]:6 * idx[e.ni] + 6] += (e.T.T @ (e.H.T @ pf + pr))[:6]
-                    F[6 * idx[e.nj]:6 * idx[e.nj] + 6] += (e.T.T @ (e.H.T @ pf + pr))[6:]
-                    a, b = eloads[eid]
-                    eloads[eid] = (a + pf, b + pr)
-        else:
-            for nid, f in pattern:
-                F[6 * idx[nid]:6 * idx[nid] + 6] += f
-        ur = spla.spsolve((C.T @ K @ C).tocsc(), C.T @ F)
+        eloads = {}
+        for case in cases:
+            for nid, f in m.nodal_loads.get(case, []):
+                F[6 * idx[nid]:6 * idx[nid] + 6] += sign * f
+            for eid, (pf, pr) in m._element_loads(case).items():
+                e = E[eid]
+                pg = e.T.T @ (e.H.T @ pf + pr)
+                F[6 * idx[e.ni]:6 * idx[e.ni] + 6] += sign * pg[:6]
+                F[6 * idx[e.nj]:6 * idx[e.nj] + 6] += sign * pg[6:]
+                a, b = eloads.get(eid, (np.zeros(12), np.zeros(12)))
+                eloads[eid] = (a + sign * pf, b + sign * pr)
+        for nid, f in pattern:
+            F[6 * idx[nid]:6 * idx[nid] + 6] += sign * np.asarray(f, float)
+        ur = spla.spsolve((self.C.T @ K @ self.C).tocsc(), self.C.T @ F)
         if not np.all(np.isfinite(ur)):
             raise RuntimeError("剛性マトリクスが特異です（崩壊機構の形成または拘束不足）")
-        du = C @ ur
+        du = self.C @ ur
         dface, dnode = {}, {}
         for eid, e in E.items():
-            dg = du[edofs[eid]]
+            dg = du[self.edofs[eid]]
             if eid in eloads:
                 pf, pr = eloads[eid]
                 dface[eid] = e.k_flex @ (e.H @ (e.T @ dg)) - pf
@@ -179,48 +223,56 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                 dnode[eid] = e.H.T @ dface[eid]
         return du, dface, dnode
 
-    def drifts(vec):
-        out = []
-        for lv in levels:
-            lo = vec[6 * idx[lv.lower] + d] if lv.lower is not None else 0.0
-            out.append((vec[6 * idx[lv.upper] + d] - lo) / lv.h)
-        return out
+    # ------------------------------------------------------------ 載荷
+    def run(self, phase, cases=(), pattern=(), sign=1.0, lam_target=None, max_drift=None, step_drift=None,
+            drift_marks=(), disp_target=None, lateral=False, checks=None):
+        """荷重（cases の節点・部材荷重 + pattern の節点荷重、いずれも × sign）を荷重係数 0 から増やす
 
-    lam = {"長期": 0.0, "水平": 0.0}
-    step = 0
-    zero_steps = 0
-    for phase in ("長期", "水平"):
+        停止条件（いずれか、到達でステップを区切って終了）:
+            lam_target  : この載荷の荷重係数がこの値に達する
+            max_drift   : 監視の |層間変形角| のいずれかがこの値に達する
+            disp_target : (節点, 自由度, 値)  節点の変位がこの値に達する（変位制御）
+        step_drift  : 1ステップの層間変形角増分の上限、drift_marks: 必ずステップを区切る層間変形角
+        lateral     : 基準の水平外力の載荷（正味の荷重係数とベースシアを更新）
+        checks      : せん断破壊・崩壊機構の判定を行う（省略時は lateral と同じ）
+        戻り値: この載荷の最終の荷重係数
+        """
+        if lam_target is None and max_drift is None and disp_target is None:
+            raise ValueError("停止条件（lam_target, max_drift, disp_target）を指定してください")
+        checks = lateral if checks is None else checks
+        m, E, hinges, ns, res = self.model, self.model.elements, self.hinges, self.ns, self.res
+        lam = 0.0
         while True:
-            if step >= max_steps:
-                raise RuntimeError(f"ステップ数が上限 {max_steps} に達しました")
+            if self.step >= self.max_steps:
+                raise RuntimeError(f"ステップ数が上限 {self.max_steps} に達しました")
             # ---- ばねの向きの仮定と解の整合（最大 20 回。整合しなければ警告を残して進む）
             for it in range(20):
-                tang = {key: hinges[key].tangent(sigma[key]) for key in hinges}
-                ntang = {key: ns[key].tangent(ns_sigma[key]) for key in ns}
+                tang = {key: hinges[key].tangent(self.sigma[key]) for key in hinges}
+                ntang = {key: ns[key].tangent(self.ns_sigma[key]) for key in ns}
                 for (nid, dof), t in ntang.items():
-                    model.node_springs[nid][dof] = t[0]
-                du, dface, dnode = solve(phase, tang)
+                    m.node_springs[nid][dof] = t[0]
+                du, dface, dnode = self._solve(cases, pattern, sign, tang)
                 dm = {key: spring_moment(dface[key[0]], key[1], key[2]) for key in hinges}
-                dF = {key: ntang[key][0] * du[6 * idx[key[0]] + key[1]] for key in ns}
+                dF = {key: ntang[key][0] * du[6 * self.idx[key[0]] + key[1]] for key in ns}
                 scale = max((abs(v) for v in dm.values()), default=0.0)
                 fscale = max((abs(v) for v in dF.values()), default=0.0)
                 changed = False
                 for key, v in dm.items():
                     if abs(v) > 1e-9 * scale:
                         s = 1 if v > 0 else -1
-                        if s != sigma[key]:
-                            sigma[key] = s
+                        if s != self.sigma[key]:
+                            self.sigma[key] = s
                             changed = True
                 for key, v in dF.items():
                     if abs(v) > 1e-9 * fscale:
                         s = 1 if v > 0 else -1
-                        if s != ns_sigma[key]:
-                            ns_sigma[key] = s
+                        if s != self.ns_sigma[key]:
+                            self.ns_sigma[key] = s
                             changed = True
                 if not changed:
                     break
             else:
-                res.unconverged.append(step + 1)
+                res.unconverged.append(self.step + 1)
             # ---- 次の事象までの荷重係数増分
             dl = math.inf
             cand = {}
@@ -239,108 +291,163 @@ def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_d
                 t = max(0.0, (lim - ns[key].F) / v)
                 ncand[key] = t
                 dl = min(dl, t)
-            rate = drifts(du)
-            cur = drifts(u)
-            if phase == "長期":
-                dl = min(dl, 1.0 - lam[phase])
-            else:
-                rmax = max(abs(r) for r in rate)
-                if ref_rate is None:
-                    ref_rate = rmax
-                if rmax > 0:
+            if lam_target is not None:
+                dl = min(dl, max(0.0, lam_target - lam))
+            rate = self.drifts(du)
+            cur = self.drifts()
+            rmax = max((abs(r) for r in rate), default=0.0)
+            if lateral and self.ref_rate is None:
+                self.ref_rate = rmax
+            if rmax > 0:
+                if step_drift:
                     dl = min(dl, step_drift / rmax)
-                    cmax = max(abs(c) for c in cur)
-                    marks = [mk for mk in drift_marks if mk > cmax * (1 + 1e-9)] + [max_drift]
-                    for c, r in zip(cur, rate):          # |層間変形角| が上限・通過点に達するまで
-                        if r != 0 and r * c >= 0:
-                            for mk in marks:
-                                dl = min(dl, max(0.0, mk - abs(c)) / abs(r))
-                for (eid, plane), cap in shear_caps.items():   # せん断力が Qsu に達するまで
-                    if (eid, plane) in sheared:
+                cmax = max(abs(c) for c in cur)
+                marks = [mk for mk in drift_marks if mk > cmax * (1 + 1e-9)]
+                marks += [max_drift] if max_drift is not None else []
+                for c, r in zip(cur, rate):          # |層間変形角| が上限・通過点に達するまで
+                    if r != 0 and r * c >= 0:
+                        for mk in marks:
+                            dl = min(dl, max(0.0, mk - abs(c)) / abs(r))
+            if disp_target is not None:              # 変位制御: 指定の変位に達するまで
+                nid, dof, val = disp_target
+                rd = du[6 * self.idx[nid] + dof]
+                gap = val - self.disp(nid, dof)
+                if rd != 0 and gap * rd >= 0:
+                    dl = min(dl, gap / rd)
+            if checks:
+                for (eid, plane), cap in self.shear_caps.items():   # せん断力が Qsu に達するまで
+                    if (eid, plane) in self.sheared:
                         continue
                     for k in ((1, 7) if plane == 0 else (2, 8)):
-                        q, dq = face[eid][k], dface[eid][k]
+                        q, dq = self.face[eid][k], dface[eid][k]
                         if dq != 0 and q * dq >= 0:
                             dl = min(dl, max(0.0, cap - abs(q)) / abs(dq))
             if math.isinf(dl):
-                raise RuntimeError("荷重増分が定まりません（外力 0 または全ばねが無限遠）")
-            zero_steps = zero_steps + 1 if dl == 0 else 0
-            if zero_steps > 1000:
+                raise RuntimeError("荷重増分が定まりません（外力 0、または停止条件に向かって変形しない）")
+            self.zero_steps = self.zero_steps + 1 if dl == 0 else 0
+            if self.zero_steps > 1000:
                 raise RuntimeError("荷重増分 0 のステップが続いています（事象の判定が収束しません）")
             # ---- 状態の更新
-            u += dl * du
+            self.u += dl * du
             for eid in E:
-                face[eid] += dl * dface[eid]
-                node[eid] += dl * dnode[eid]
-            lam[phase] += dl
-            step += 1
-            Q = lam["水平"] * abs(lat_total)
-            dr = drifts(u)
+                self.face[eid] += dl * dface[eid]
+                self.node[eid] += dl * dnode[eid]
+            lam += dl
+            if lateral:
+                self.lam_lat += sign * dl
+            self.step += 1
+            step = self.step
+            Q = self.lam_lat * abs(self.lat_total)
+            dr = self.drifts()
+            drift_now = max((abs(x) for x in dr), default=0.0)
             evs = []
             for key, h in hinges.items():
                 flex, lim, kind = tang[key]
                 hit = key in cand and cand[key] <= dl * (1 + 1e-9) + 1e-300
-                for ev in h.advance(dl * dm[key], flex, sigma[key], hit, lim, kind):
-                    side = sigma[key]
-                    rec = dict(step=step, key=key, label=labels[key], event=ev, side=side,
-                               lam=lam[phase], Q=Q, drift=max((abs(x) for x in dr), default=0.0),
-                               phase=phase)
+                for ev in h.advance(dl * dm[key], flex, self.sigma[key], hit, lim, kind):
+                    rec = dict(step=step, key=key, label=self.labels[key], event=ev, side=self.sigma[key],
+                               lam=lam, Q=Q, drift=drift_now, phase=phase)
                     evs.append(rec)
                     res.events.append(rec)
             for key, sp_ in ns.items():
                 k_t, lim, kind = ntang[key]
                 hit = key in ncand and ncand[key] <= dl * (1 + 1e-9) + 1e-300
                 for ev in sp_.advance(dl * dF[key], hit, lim):
-                    rec = dict(step=step, key=key, label=ns_labels[key], event=ev, side=ns_sigma[key],
-                               lam=lam[phase], Q=Q, drift=max((abs(x) for x in dr), default=0.0),
-                               phase=phase)
+                    rec = dict(step=step, key=key, label=self.ns_labels[key], event=ev, side=self.ns_sigma[key],
+                               lam=lam, Q=Q, drift=drift_now, phase=phase)
                     evs.append(rec)
                     res.events.append(rec)
-            if phase == "水平":
-                drift_now = max((abs(x) for x in dr), default=0.0)
-                for (eid, plane), cap in shear_caps.items():
-                    if (eid, plane) in sheared:
+            if checks:
+                for (eid, plane), cap in self.shear_caps.items():
+                    if (eid, plane) in self.sheared:
                         continue
-                    q = max(abs(face[eid][k]) for k in ((1, 7) if plane == 0 else (2, 8)))
+                    q = max(abs(self.face[eid][k]) for k in ((1, 7) if plane == 0 else (2, 8)))
                     if q >= cap * (1 - 1e-9):
-                        sheared.add((eid, plane))
-                        rec = dict(step=step, key=(eid, plane), label=shear_labels[(eid, plane)],
-                                   event="せん断破壊", side=0, lam=lam[phase], Q=Q, drift=drift_now,
-                                   phase=phase)
+                        self.sheared.add((eid, plane))
+                        rec = dict(step=step, key=(eid, plane), label=self.shear_labels[(eid, plane)],
+                                   event="せん断破壊", side=0, lam=lam, Q=Q, drift=drift_now, phase=phase)
                         evs.append(rec)
                         res.events.append(rec)
-                if mechanism_check and res.mechanism_step is None and any(
+                if self.mechanism_check and res.mechanism_step is None and any(
                         any(h.yielded.values()) for h in hinges.values()):
                     rel = {}
                     for key, h in hinges.items():
-                        flex, lim, kind = h.tangent(sigma[key])
+                        flex, lim, kind = h.tangent(self.sigma[key])
                         if kind == "post":                       # 降伏後の分岐 → 解放（ピン）
-                            flex = 1e6 / h.sk[sigma[key]].ks3
+                            flex = 1e6 / h.sk[self.sigma[key]].ks3
                         rel[key] = (flex, lim, kind)
                     try:
-                        mdu, _, _ = solve("水平", rel)
-                        mrate = [abs(x) for x in drifts(mdu)]
+                        mdu, _, _ = self._solve(cases, pattern, sign, rel)
+                        mrate = [abs(x) for x in self.drifts(mdu)]
                     except RuntimeError:
-                        mrate = [math.inf] * len(levels)
-                    if max(mrate) > 1e5 * ref_rate:
+                        mrate = [math.inf] * len(self.levels)
+                    if max(mrate) > 1e5 * self.ref_rate:
                         res.mechanism_step = step
                         top = max(mrate)
-                        res.mechanism_stories = [lv.name for lv, x in zip(levels, mrate)
+                        res.mechanism_stories = [lv.name for lv, x in zip(self.levels, mrate)
                                                  if x > 0.1 * top]
-            res.steps.append(dict(step=step, phase=phase, lam=lam[phase], Q=Q, drifts=dr,
-                                  events=evs))
-            if keep_states:
-                res.states[step] = (u.copy(), {eid: face[eid].copy() for eid in E})
+            res.steps.append(dict(step=step, phase=phase, lam=lam, Q=Q, drifts=dr, events=evs))
+            if self.keep_states:
+                res.states[step] = (self.u.copy(), {eid: self.face[eid].copy() for eid in E})
                 res.hinge_theta[step] = {key: h.theta for key, h in hinges.items()}
-            if phase == "長期" and lam[phase] >= 1.0 - 1e-12:
+            if lam_target is not None and lam >= lam_target - 1e-12 * max(1.0, abs(lam_target)):
                 break
-            if phase == "水平" and max(abs(x) for x in dr) >= max_drift * (1 - 1e-9):
+            if max_drift is not None and drift_now >= max_drift * (1 - 1e-9):
                 break
-        if phase == "長期":
-            res.gravity_disp = {nid: u[6 * k:6 * k + 6].copy() for nid, k in idx.items()}
+            if disp_target is not None:
+                nid, dof, val = disp_target
+                if abs(self.disp(nid, dof) - val) <= 1e-9 * max(abs(val), 1e-9):
+                    break
+        return lam
 
+    def unload(self, pattern, phase="除荷", step_drift=None):
+        """基準の水平外力を正味の荷重係数 0 まで戻す（除荷）。戻り値: 除荷した荷重係数"""
+        lam0 = self.lam_lat
+        if lam0 == 0:
+            return 0.0
+        return self.run(phase, pattern=pattern, sign=-math.copysign(1.0, lam0), lam_target=abs(lam0),
+                        step_drift=step_drift, lateral=True, checks=False)
+
+
+def residual_table(inc, pattern, peaks, step_drift=None, drift_marks=()):
+    """最大の層間変形角（または変位）peaks まで水平外力で押し、それぞれ除荷した残留値の表
+
+    inc は長期荷重を載荷済みの Incremental。peaks は昇順。各点で状態を保存して除荷し、
+    元に戻して次の点へ進む（解析は 1本の載荷経路で済む）。
+    戻り値: [dict(peak, Q_peak, lam_peak, residual: [各層の残留値], step_peak, step_residual)]
+    """
+    rows = []
+    for pk in peaks:
+        inc.run("水平", pattern=pattern, max_drift=pk, step_drift=step_drift, drift_marks=drift_marks,
+                lateral=True)
+        snap = inc.snapshot()
+        Qp, lp, sp = inc.lam_lat * abs(inc.lat_total), inc.lam_lat, inc.step
+        inc.unload(pattern, step_drift=step_drift)
+        rows.append(dict(peak=pk, Q_peak=Qp, lam_peak=lp, residual=inc.drifts(), step_peak=sp,
+                         step_residual=inc.step))
+        inc.restore(snap)
+    return rows
+
+
+def pushover(model, hinges, gravity_cases, pattern, levels, d, max_drift, step_drift,
+             labels=None, max_steps=20000, shear_caps=None, shear_labels=None,
+             mechanism_check=False, drift_marks=(), keep_states=False,
+             node_springs=None, node_labels=None):
+    """長期荷重（gravity_cases）を荷重係数 0→1 で載荷した後、水平外力 pattern を層間変形角 max_drift まで
+    比例増加する（Incremental の薄いラッパー。引数の意味は Incremental.run を参照）
+    戻り値: PushoverResult（final 以外。final は呼び出し側で設定）
+    """
+    lat_total = sum(F[d] for _, F in pattern)
+    inc = Incremental(model, hinges, levels, d, labels, max_steps, shear_caps, shear_labels,
+                      mechanism_check, keep_states, node_springs, node_labels, lateral_total=lat_total)
+    inc.run("長期", cases=gravity_cases, lam_target=1.0)
+    inc.res.gravity_disp = {nid: inc.u[6 * k:6 * k + 6].copy() for nid, k in inc.idx.items()}
+    inc.run("水平", pattern=pattern, max_drift=max_drift, step_drift=step_drift, drift_marks=drift_marks,
+            lateral=True)
+    res = inc.res
     res.total_P = lat_total
-    res._state = (u, face, node, idx)
+    res._state = inc.state
+    res.inc = inc                        # 続けて除荷・再載荷するための状態
     return res
 
 
