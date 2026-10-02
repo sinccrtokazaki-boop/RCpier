@@ -576,8 +576,8 @@ SECTIONS = (
 )
 
 
-def assemble_html(obj, sections, ctx, cover_html):
-    """章 [(id, 題名, 関数(obj, ctx) -> HTML or None)] から計算書の HTML を組み立てる（建物・桟橋で共通）"""
+def assemble_html(obj, sections, ctx, cover_html, extra_css="", extra_js="", title=None):
+    """章 [(id, 題名, 関数(obj, ctx) -> HTML or None)] から計算書の HTML を組み立てる（建物・桟橋・利用可否で共通）"""
     parts, toc = [], []
     for sid, title, fn in sections:
         body = fn(obj, ctx)
@@ -586,12 +586,12 @@ def assemble_html(obj, sections, ctx, cover_html):
         n = len(toc) + 1
         toc.append(f'<li><a href="#{sid}">{escape(title)}</a></li>')
         parts.append(f'<section id="{sid}"><h2>{n}. {escape(title)}</h2>{body}</section>')
-    title = obj.report.get("title") or f"構造計算書 {obj.name}"
+    title = title or obj.report.get("title") or f"構造計算書 {obj.name}"
     return ("<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>{escape(title)}</title><style>{CSS}</style></head><body><main>"
+            f"<title>{escape(title)}</title><style>{CSS}{extra_css}</style></head><body><main>"
             f"{cover_html}<nav class=\"toc\"><b>目次</b><ol>{''.join(toc)}</ol></nav>"
-            f"{''.join(parts)}</main><script>{JS}</script></body></html>")
+            f"{''.join(parts)}</main><script>{JS}{extra_js}</script></body></html>")
 
 
 def build_report(obj, ctx=None):

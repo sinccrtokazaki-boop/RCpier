@@ -11,6 +11,7 @@
 
 使い方: python -m rcframe.port_batch 入力.yaml -o 出力の名前（.jsonl と .csv）[-j 並列数]
         [--cards フォルダ [--cards-all]]（判定カードと一覧 index.html、port_cards）
+        [--report 報告書.html]（検討報告書、usability_report）
 単位: YAML は m（地盤変位・層厚・残留変位）、結果の表も m・rad
 """
 import argparse
@@ -322,7 +323,12 @@ class Batch:
                     if r["tier"] == "screen":
                         r["refine_reason"] = refine_reason(r, self.cfg["refine"]["when"])
         if out:
-            write_csv(rows, f"{out}.csv")
+            try:
+                write_csv(rows, f"{out}.csv")
+            except PermissionError:                         # Excel などで開いている
+                alt = f"{out}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+                write_csv(rows, alt)
+                log(f"[注意] {out}.csv を書き込めないため（他のプログラムで開いている）{alt} に書きました")
         return rows
 
     def _map(self, todo, tier, workers):
@@ -363,6 +369,7 @@ def main(argv=None):
     ap.add_argument("-j", "--workers", type=int, default=None)
     ap.add_argument("--cards", default=None, help="判定カードと一覧（index.html）を書き出すフォルダ")
     ap.add_argument("--cards-all", action="store_true", help="全シナリオのカードを作る（既定は利用不可・制限付き利用）")
+    ap.add_argument("--report", default=None, help="検討報告書（HTML）の出力先")
     a = ap.parse_args(argv)
     data = yaml.safe_load(Path(a.input).read_text(encoding="utf-8"))
     out = a.out or str(Path(a.input).with_suffix("")) + "_scenarios"
@@ -379,6 +386,10 @@ def main(argv=None):
         which = "all" if a.cards_all or not b.pier.usability else ("制限付き利用", "利用不可")
         idx = write_cards(b, rows, a.cards, which, a.workers or b.cfg["workers"])
         print(f"判定カード → {idx}")
+    if a.report:
+        from .usability_report import write_usability_report
+        p = write_usability_report(b, rows, a.report, Path(a.input).read_text(encoding="utf-8"))
+        print(f"報告書 → {p}")
 
 
 if __name__ == "__main__":

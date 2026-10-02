@@ -313,6 +313,31 @@ def xy_chart(series, xlabel, ylabel, marks=(), hmarks=(), width=720, height=380,
     return svg(width, height, body)
 
 
+def scatter_chart(points, xlabel, ylabel, legend=(), width=720, height=380, xfmt="{:g}", yfmt="{:g}"):
+    """散布図  points: [(x, y, クラス, 説明)]（x, y ≧ 0）、legend: [(名前, クラス)]"""
+    ml, mr, mt, mb = 70, 140, 20, 50
+    xm = max([x for x, _, _, _ in points] + [1e-12]) * 1.08
+    ym = max([y for _, y, _, _ in points] + [1e-12]) * 1.1
+    W, H = width - ml - mr, height - mt - mb
+    P = lambda x, y: (ml + x / xm * W, mt + H - y / ym * H)
+    body = [line(P(0, 0), P(xm, 0), "axis"), line(P(0, 0), P(0, ym), "axis")]
+    for t in _nice_ticks(ym):
+        body.append(line(P(0, t), P(xm, t), "tick"))
+        body.append(text(P(0, t), yfmt.format(t), "axlbl", anchor="end", dy=4))
+    for t in _nice_ticks(xm):
+        body.append(line(P(t, 0), P(t, ym), "tick"))
+        body.append(text(P(t, 0), xfmt.format(t), "axlbl", dy=16))
+    for x, y, cls, title in points:
+        body.append(circle(P(x, y), 4.5, cls, title))
+    for k, (name, cls) in enumerate(legend):
+        body.append(circle((width - mr + 22, mt + 16 + 18 * k), 4.5, cls))
+        body.append(text((width - mr + 34, mt + 20 + 18 * k), name, "axlbl", anchor="start"))
+    body.append(text((ml + W / 2, height - 8), xlabel, "axlbl"))
+    body.append(f'<text class="axlbl" transform="translate(16,{mt + H / 2:.0f}) rotate(-90)" '
+                f'text-anchor="middle">{escape(ylabel)}</text>')
+    return svg(width, height, body)
+
+
 # ============================================================ 桟橋
 def pier_plan(pier, width=720):
     """桟橋の平面図: 上部工の外形（張出しを含む）、梁、杭（外径の実寸）、防舷材・係船柱"""

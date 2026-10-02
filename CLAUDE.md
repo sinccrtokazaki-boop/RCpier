@@ -44,6 +44,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
 - `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
 - `rcframe/port_usability.py`: 利用可否の判定（judge）・許容荷重（allowable_loads）・超過確率（probability_summary）
+- `rcframe/usability_report.py`: 利用可否シナリオの検討報告書（HTML、report.assemble_html）。`port_batch --report 報告書.html`
 - `rcframe/port_cards.py`: 判定カードと一覧の HTML（write_cards、report.CSS と svg を使う）。`port_batch --cards フォルダ`
 - `rcframe/port_batch.py`: シナリオの一括実行（Batch、2段階、並列、JSON Lines で再開）。`python -m rcframe.port_batch 入力.yaml -j 4`
 - `rcframe/port_flow.py` : 側方流動のシナリオ（FlowCase、run_flow）。地盤変位は Incremental.run の ground（等価節点力 k·Δug）

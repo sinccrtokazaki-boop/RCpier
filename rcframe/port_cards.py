@@ -35,6 +35,8 @@ CARD_CSS = """
 .gdisp{stroke:#8d6e3f;stroke-width:1.5;stroke-dasharray:5 3;fill:none}
 .bar-ok{fill:#1b7f3b}.bar-ng{fill:#c0392b}.bar-bg{fill:#eef1f5}.req{stroke:#1d2430;stroke-width:1.5}
 .ctl{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:13px}
+.wrap td{white-space:normal;min-width:7em}
+.pt0{fill:#1b7f3b;fill-opacity:.85}.pt1{fill:#e69f00;fill-opacity:.9}.pt2{fill:#c0392b;fill-opacity:.85}
 th.sort{cursor:pointer}th.sort:hover{background:#e2e7ee}
 td a{color:var(--acc)}
 """
@@ -211,52 +213,60 @@ def card_html(pier, row, fr, opts, params):
     return _page(f"判定カード {row['id']}", "".join(parts))
 
 
-def index_html(name, rows, opts, cards):
-    """一覧ページ（HTML 文字列）。cards: {id: カードのファイル名}"""
-    fr = sorted(final_rows(rows), key=lambda r: (-STATUS.index(r["status"]) if r.get("status") in STATUS else 0,
-                                                 -abs(r["deck_residual"])))
-    parts = [f"<h1>利用可否シナリオの一覧</h1><p class=\"mute\">{escape(name)} ・ {len(fr)} シナリオ</p>"]
-    if opts:
-        s = probability_summary(rows, opts)
-        parts.append("<h3>判定の割合</h3>")
-        parts.append(table(["判定", "件数", "割合", "標準誤差"],
-                           [[Raw(f'<span class="status {STATUS_CLS[k]}" style="font-size:13px">{k}</span>'),
-                             sum(r.get("status") == k for r in fr), f"{p:.1%}", f"{se:.1%}"]
-                            for k, (p, se) in s["status"].items()], num=(1, 2, 3)))
-        if s["allow"]:
-            parts.append(table(["荷重", "必要な値", "許容値が不足する割合", "標準誤差"],
-                               [[LOAD_NAME[k], f"{opts['required'][k]:g} {LOAD_UNIT[k]}", f"{p:.1%}", f"{se:.1%}"]
-                                for k, (p, se) in s["allow"].items()], num=(2, 3)))
-        series, notes, fits = [], [], []
-        xs = [float(r["surface"]) for r in fr if not isinstance(r["surface"], str)]
-        xmax = max(xs + [0.1]) * 1.2
-        for k, (lab, cls) in enumerate((("制限付き利用以上", "c1"), ("利用不可", "c4"))):
-            f = s["fragility"][lab]
-            if f is None:
-                notes.append(f"{lab}: 推定できません（全て同じ判定）")
-                continue
-            th, b = f
-            from scipy.stats import norm
-            pts = [(x, float(norm.cdf(math.log(x / th) / b))) for x in
-                   (xmax * (i + 1) / 80 for i in range(80))]
-            series.append((lab, pts, cls))
-            fits.append([lab, f"{th:.3f} m", f"{b:.3f}"])
-        if series:
-            parts.append("<h3>フラジリティ曲線</h3>")
-            parts.append(figure(xy_chart(series, "海底面の地盤変位 [m]", "確率", xfmt="{:.2f}", yfmt="{:.2f}"),
-                                "海底面の地盤変位（surface）に対する判定の確率 P = Φ(ln(x/θ)/β)（最尤法）"))
-            parts.append(table(["判定", "中央値 θ", "対数標準偏差 β"], fits, num=(1, 2)))
-            if any(float(f[2]) < 0.01 for f in fits):
-                notes.append("β がほぼ 0 の曲線は、判定が地盤変位だけで完全に分かれている（他の変数のばらつきの影響が"
-                             "小さい、またはシナリオが少ない）ため、最尤推定が階段状になったものです")
-        for n in notes:
-            parts.append(f'<p class="note">{escape(n)}</p>')
-        parts.append('<p class="note">確率として読めるのは scenarios.distributions で抽出した場合です'
-                     '（grid の場合は組合せの中の割合）。</p>')
+def sorted_final(rows):
+    """最終結果の行（判定の厳しい順、同じ判定では残留変位の大きい順）"""
+    return sorted(final_rows(rows), key=lambda r: (-STATUS.index(r["status"]) if r.get("status") in STATUS else 0,
+                                                   -abs(r["deck_residual"])))
+
+
+def summary_parts(rows, opts, h="h3"):
+    """判定の割合・許容荷重の不足・フラジリティ曲線（HTML 部品のリスト）"""
+    fr = final_rows(rows)
+    s = probability_summary(rows, opts)
+    parts = [f"<{h}>判定の割合</{h}>",
+             table(["判定", "件数", "割合", "標準誤差"],
+                   [[Raw(f'<span class="status {STATUS_CLS[k]}" style="font-size:13px">{k}</span>'),
+                     sum(r.get("status") == k for r in fr), f"{p:.1%}", f"{se:.1%}"]
+                    for k, (p, se) in s["status"].items()], num=(1, 2, 3))]
+    if s["allow"]:
+        parts.append(table(["荷重", "必要な値", "許容値が不足する割合", "標準誤差"],
+                           [[LOAD_NAME[k], f"{opts['required'][k]:g} {LOAD_UNIT[k]}", f"{p:.1%}", f"{se:.1%}"]
+                            for k, (p, se) in s["allow"].items()], num=(2, 3)))
+    series, notes, fits = [], [], []
+    xs = [float(r["surface"]) for r in fr if not isinstance(r["surface"], str)]
+    xmax = max(xs + [0.1]) * 1.2
+    for lab, cls in (("制限付き利用以上", "c1"), ("利用不可", "c4")):
+        f = s["fragility"][lab]
+        if f is None:
+            notes.append(f"{lab}: 推定できません（全て同じ判定）")
+            continue
+        th, b = f
+        from scipy.stats import norm
+        pts = [(x, float(norm.cdf(math.log(x / th) / b))) for x in (xmax * (i + 1) / 80 for i in range(80))]
+        series.append((lab, pts, cls))
+        fits.append([lab, f"{th:.3f} m", f"{b:.3f}"])
+    if series:
+        parts.append(f"<{h}>フラジリティ曲線</{h}>")
+        parts.append(figure(xy_chart(series, "海底面の地盤変位 [m]", "確率", xfmt="{:.2f}", yfmt="{:.2f}"),
+                            "海底面の地盤変位（surface）に対する判定の確率 P = Φ(ln(x/θ)/β)（最尤法）"))
+        parts.append(table(["判定", "中央値 θ", "対数標準偏差 β"], fits, num=(1, 2)))
+        if any(float(f[2]) < 0.01 for f in fits):
+            notes.append("β がほぼ 0 の曲線は、判定が地盤変位だけで完全に分かれている（他の変数のばらつきの影響が"
+                         "小さい、またはシナリオが少ない）ため、最尤推定が階段状になったものです")
+    for n in notes:
+        parts.append(f'<p class="note">{escape(n)}</p>')
+    parts.append('<p class="note">確率として読めるのは scenarios.distributions で抽出した場合です'
+                 '（grid の場合は組合せの中の割合）。</p>')
+    return parts
+
+
+def scenario_table(rows, cards=None, interactive=True):
+    """シナリオの表（HTML）。cards: {id: カードのファイル名}（リンク）、interactive: 並べ替え・絞り込み"""
+    cards = cards or {}
     head = ["id", "判定", "地盤変位 [m]", "層厚 [m]", "kh", "εcu", "残留変位 [m]", "杭の降伏", "局部座屈",
             "上載 [kN/m²]", "接岸 [kN]", "牽引 [kN]", "段階"]
     trs = []
-    for r in fr:
+    for r in sorted_final(rows):
         st = r.get("status", "")
         link = f'<a href="{escape(cards[r["id"]])}">{escape(r["id"])}</a>' if r["id"] in cards else escape(r["id"])
         cells = [link, f'<span class="status {STATUS_CLS.get(st, "")}" style="font-size:12px">{escape(st)}</span>',
@@ -268,12 +278,23 @@ def index_html(name, rows, opts, cards):
         vals = ["", str(STATUS.index(st)) if st in STATUS else "", "", "", "", "", "", "", "", "", "", "", ""]
         tds = "".join(f'<td data-v="{escape(v)}">{c}</td>' if v else f"<td>{c}</td>" for c, v in zip(cells, vals))
         trs.append(f'<tr data-st="{escape(st)}">{tds}</tr>')
-    opts_html = "".join(f'<option value="{s_}">{s_}</option>' for s_ in STATUS)
+    ctl = ""
+    if interactive:
+        opts_html = "".join(f'<option value="{s_}">{s_}</option>' for s_ in STATUS)
+        ctl = (f'<div class="ctl screen-only">判定で絞り込み <select id="flt"><option value="">すべて</option>{opts_html}'
+               '</select><span class="mute">見出しをクリックで並べ替え</span></div>')
+    return (ctl + '<div class="tw"><table><thead><tr>'
+            + "".join(f'<th class="sort">{escape(x)}</th>' for x in head)
+            + f'</tr></thead><tbody id="rows">{"".join(trs)}</tbody></table></div>')
+
+
+def index_html(name, rows, opts, cards):
+    """一覧ページ（HTML 文字列）。cards: {id: カードのファイル名}"""
+    parts = [f"<h1>利用可否シナリオの一覧</h1><p class=\"mute\">{escape(name)} ・ {len(final_rows(rows))} シナリオ</p>"]
+    if opts:
+        parts += summary_parts(rows, opts)
     parts.append("<h3>シナリオ</h3>")
-    parts.append(f'<div class="ctl">判定で絞り込み <select id="flt"><option value="">すべて</option>{opts_html}'
-                 '</select><span class="mute">見出しをクリックで並べ替え</span></div>')
-    parts.append('<div class="tw"><table><thead><tr>' + "".join(f'<th class="sort">{escape(h)}</th>' for h in head)
-                 + f'</tr></thead><tbody id="rows">{"".join(trs)}</tbody></table></div>')
+    parts.append(scenario_table(rows, cards))
     return _page(f"利用可否シナリオの一覧 {name}", "".join(parts), INDEX_JS)
 
 
