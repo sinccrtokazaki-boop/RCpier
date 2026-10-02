@@ -40,7 +40,7 @@ class Pier(GridMixin):
     """
     TOP_KEYS = ("type", "name", "materials", "sections", "grids", "deck", "beams", "piles",
                 "loads", "report", "unit_weight", "actions", "combinations", "checks", "level2",
-                "lateral_flow")
+                "lateral_flow", "scenarios")                 # scenarios は一括実行（port_batch）が読む
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")

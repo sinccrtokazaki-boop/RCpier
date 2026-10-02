@@ -87,3 +87,20 @@ lateral_flow:
     kh: 0.15                        # 同時に作用させる慣性力の換算震度（0 なら地盤変位のみ）
     order: simultaneous             # simultaneous / ground_first / inertia_first
     unload: true                    # 最後に慣性力を除荷して残留変位を求める
+# 利用可否シナリオの一括実行（利用可否 U4）: python -m rcframe.port_batch examples/pier_level2.yaml -j 4
+scenarios:
+  base:                             # 全シナリオ共通の値（lateral_flow と同じ項目、単位 m）
+    direction: +y
+    shape: cos
+    kh_factor: 0.1
+    order: simultaneous
+    surface_ratio: {L: 1.0, M: 0.8, S: 0.6}   # 列ごとの地盤変位の比（surface × 比）
+  grid:                             # 候補の組合せ（3 × 2 × 2 × 2 = 24 シナリオ）
+    surface: [0.25, 0.5, 1.0]       # 海側の列の海底面の地盤変位 [m]
+    depth: [4.0, 8.0]               # 流動する層の厚さ [m]
+    kh: [0.0, 0.15]                 # 同時に作用させる慣性力の換算震度
+    ecu: [A, B]                     # 局部座屈ひずみの式（2段目のファイバーのヒンジで使う）
+  screening: {segment: 1.0}         # 1段目: 地中部の分割 1 m、cos 式のヒンジ
+  refine:                           # 2段目（入力の分割・ファイバー）に回す条件
+    when: {pile_yield: true, residual: [0.1, 2.0]}   # 杭の降伏、または上部工の残留変位 [m] がこの範囲
+  workers: 4                        # 並列数

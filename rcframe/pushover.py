@@ -153,6 +153,8 @@ class Incremental:
         self.zero_steps = 0
         self.edofs = {eid: np.r_[6 * self.idx[e.ni] + np.arange(6), 6 * self.idx[e.nj] + np.arange(6)]
                       for eid, e in E.items()}
+        self._eids = list(E)
+        self._edof_arr = np.array([self.edofs[eid] for eid in self._eids])
 
     # ------------------------------------------------------------ 状態
     @property
@@ -220,16 +222,16 @@ class Incremental:
         if not np.all(np.isfinite(ur)):
             raise RuntimeError("剛性マトリクスが特異です（崩壊機構の形成または拘束不足）")
         du = self.C @ ur
-        dface, dnode = {}, {}
-        for eid, e in E.items():
-            dg = du[self.edofs[eid]]
-            if eid in eloads:
-                pf, pr = eloads[eid]
-                dface[eid] = e.k_flex @ (e.H @ (e.T @ dg)) - pf
-                dnode[eid] = e.H.T @ dface[eid] - pr
-            else:
-                dface[eid] = e.k_flex @ (e.H @ (e.T @ dg))
-                dnode[eid] = e.H.T @ dface[eid]
+        # 材端力の増分（全要素をまとめて計算）: face = k_face·dg、node = Hᵀ·face
+        eids = self._eids
+        kf = np.stack([E[eid].k_face for eid in eids])
+        HT = np.stack([E[eid].H.T for eid in eids])
+        fa = np.einsum("eij,ej->ei", kf, du[self._edof_arr])
+        no = np.einsum("eij,ej->ei", HT, fa)
+        dface, dnode = dict(zip(eids, fa)), dict(zip(eids, no))
+        for eid, (pf, pr) in eloads.items():
+            dface[eid] = dface[eid] - pf
+            dnode[eid] = E[eid].H.T @ dface[eid] - pr
         return du, dface, dnode, dug
 
     # ------------------------------------------------------------ 載荷

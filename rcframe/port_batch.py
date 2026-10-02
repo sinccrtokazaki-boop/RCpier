@@ -1,0 +1,306 @@
+"""桟橋の利用可否シナリオの一括実行（利用可否 U4）
+
+    シナリオの生成: YAML の scenarios（base の既定値 + grid の候補の組合せ、sample で無作為抽出）
+    2段階の計算:
+        1段目 ふるい分け（screen）: 地中部を粗く分割（screening.segment）、Mp(N) の cos 式のヒンジ。
+              地盤変位 0（慣性力のみ）のシナリオは仮想固定点モデル
+        2段目 詳細化（refine）: 入力の分割・ファイバーのヒンジ（εcu はシナリオの ecu）で計算し直す。
+              対象は refine.when の条件（杭の降伏、上部工の残留変位の範囲）に当てはまるシナリオ
+    並列実行（concurrent.futures.ProcessPoolExecutor、workers）。結果は 1シナリオ 1行の JSON Lines に
+    逐次追記し、再実行時は計算済み（同じ id・段階）を飛ばす。CSV にも書き出す
+
+使い方: python -m rcframe.port_batch 入力.yaml -o 出力の名前（.jsonl と .csv）[-j 並列数]
+単位: YAML は m（地盤変位・層厚・残留変位）、結果の表も m・rad
+"""
+import argparse
+import copy
+import csv
+import hashlib
+import itertools
+import json
+import math
+import os
+import random
+import time
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict
+from pathlib import Path
+
+import yaml
+
+from .grid import InputError, _check_keys, _num
+from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
+
+M = 1e3
+PARAMS = FLOW_KEYS + ("ecu", "surface_ratio")       # シナリオの変数（grid・base に書ける）
+COLUMNS = ["id", "tier", "direction", "surface", "depth", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
+           "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
+           "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain",
+           "soil_yield", "refine_reason", "seconds"]
+
+
+# ============================================================ シナリオの生成
+def read_scenarios(d):
+    """scenarios の設定を読む。戻り値: dict(base, grid, sample, seed, screening, refine, workers)"""
+    if not d:
+        raise InputError("scenarios がありません")
+    _check_keys(d, ("base", "grid", "sample", "seed", "screening", "refine", "workers"), "scenarios")
+    base = dict(d.get("base") or {})
+    grid = dict(d.get("grid") or {})
+    for what, src in (("base", base), ("grid", grid)):
+        _check_keys(src, PARAMS, f"scenarios.{what}")
+    for k, v in grid.items():
+        if not isinstance(v, list) or not v:
+            raise InputError(f"scenarios.grid.{k}: 候補をリストで与えてください")
+    sample = d.get("sample")
+    if sample is not None and (not isinstance(sample, int) or sample <= 0):
+        raise InputError("scenarios.sample: 正の整数です")
+    scr = dict(d.get("screening") or {})
+    _check_keys(scr, ("segment",), "scenarios.screening")
+    ref = d.get("refine", {"when": {"pile_yield": True}})
+    if ref in ("all", "none"):
+        ref = {"when": ref}
+    _check_keys(ref, ("when", "segment"), "scenarios.refine")
+    when = ref.get("when", {"pile_yield": True})
+    if when not in ("all", "none"):
+        _check_keys(when, ("pile_yield", "residual"), "scenarios.refine.when")
+        if "residual" in when:
+            lo, hi = (_num(x, "scenarios.refine.when.residual") for x in when["residual"])
+            if not 0 <= lo < hi:
+                raise InputError("scenarios.refine.when.residual: [下限, 上限]（m、下限 < 上限）です")
+    return dict(base=base, grid=grid, sample=sample, seed=int(d.get("seed", 1)),
+                screening=dict(segment=_num(scr.get("segment", 1.0), "scenarios.screening.segment")),
+                refine=dict(when=when, segment=ref.get("segment")),
+                workers=int(d.get("workers", 1)))
+
+
+def scenario_params(cfg):
+    """grid の組合せ（sample があれば無作為に抽出）を [dict] で返す。各 dict は base に grid の値を重ねたもの"""
+    keys = list(cfg["grid"])
+    combos = [dict(zip(keys, vals)) for vals in itertools.product(*(cfg["grid"][k] for k in keys))]
+    if cfg["sample"] is not None and cfg["sample"] < len(combos):
+        combos = random.Random(cfg["seed"]).sample(combos, cfg["sample"])
+    return [{**cfg["base"], **c} for c in combos]
+
+
+def scenario_id(params):
+    """シナリオの id（変数の値から決まる短いハッシュ。再実行で同じ id になる）"""
+    s = json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
+    return "S" + hashlib.sha1(s.encode("utf-8")).hexdigest()[:10]
+
+
+def to_flow_case(pier, params, name):
+    """シナリオの変数（YAML の単位）を FlowCase と ecu の設定に変換する。
+    surface がスカラーで surface_ratio（列ごとの比）があれば、列ごとの値 = surface × 比"""
+    p = dict(params)
+    ecu = p.pop("ecu", "A")
+    ratio = p.pop("surface_ratio", None)
+    if ratio is not None and not isinstance(p.get("surface"), dict):
+        p["surface"] = {r: _num(p.get("surface", 0.0), "surface") * _num(v, f"surface_ratio.{r}")
+                        for r, v in ratio.items()}
+    case = read_flow_cases(pier, {name: p})[0]
+    e = str(ecu)
+    ecu_opt = (e, None) if e in ("A", "B") else ("value", _num(ecu, "ecu"))
+    return case, ecu_opt
+
+
+# ============================================================ 1シナリオの計算（子プロセスでも動く）
+_PIERS = {}
+
+
+def _pier(data, segment, model):
+    """入力 data の杭の分割長・モデルを変えた Pier（プロセスごとにキャッシュ）"""
+    from .pier import Pier
+    key = (hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest(), segment, model)
+    if key not in _PIERS:
+        d = copy.deepcopy(data)
+        d.pop("scenarios", None)
+        d.pop("lateral_flow", None)
+        d["piles"]["model"] = model
+        if segment is not None:
+            d["piles"]["segment"] = segment
+        _PIERS[key] = Pier(d)
+    return _PIERS[key]
+
+
+def _summary(r, sid, tier, params, seconds):
+    """FlowResult → 結果の表の 1行"""
+    c = r.case
+    head, head_r = r.max_rotation("杭頭"), r.max_rotation("杭頭", residual=True)
+    ing, ing_r = r.max_rotation("地中部"), r.max_rotation("地中部", residual=True)
+    dm = r.damage()
+    surf = params.get("surface")
+    return {
+        "id": sid, "tier": tier, "direction": c.direction,
+        "surface": surf if not isinstance(surf, dict) else json.dumps(surf, ensure_ascii=False),
+        "depth": c.depth / M, "shape": c.shape, "kh_factor": c.kh_factor, "pu_factor": c.pu_factor,
+        "kh": c.kh, "order": c.order, "ecu": str(params.get("ecu", "A")),
+        "reached": r.reached, "deck_peak": r.deck["peak"] / M, "deck_residual": r.deck["residual"] / M,
+        "deck_rot": r.deck["rot_residual"], "head_rot_max": head[0], "head_rot_res": head_r[0],
+        "inground_rot_max": ing[0], "inground_rot_res": ing_r[0], "n_yield": len(r.yielded),
+        "n_buckled": sum(x["level"] == "局部座屈" for x in dm) if dm else None,
+        "n_plastic": sum(x["level"] == "塑性化" for x in dm) if dm else None,
+        "max_strain": max((x["strain"] for x in dm), default=None) if dm else None,
+        "soil_yield": sum(s.yielded for s in r.soil.values()), "refine_reason": "",
+        "seconds": round(seconds, 2),
+    }
+
+
+def run_one(data, sid, params, tier, segments):
+    """1シナリオの計算。tier = "screen"（粗い分割・cos 式）/ "refine"（入力の分割・ファイバー）"""
+    t0 = time.time()
+    ground = any(v != 0 for v in _surface_values(params))
+    if tier == "screen":
+        model = "soil_spring" if ground else "fixed_point"
+        pier = _pier(data, segments["screen"] if ground else None, model)
+        hinge = {"model": "cos", "ecu": ("A", None), "hardening": 0.01, "hinge_length": 1.0}
+    else:
+        pier = _pier(data, segments["refine"], "soil_spring")
+        hinge = dict(pier.level2["pile_hinge"])
+        hinge["model"] = "fiber"
+    case, ecu = to_flow_case(pier, params, sid)
+    if tier == "refine":
+        hinge["ecu"] = ecu
+    r = run_flow(pier, case, hinge_opt=hinge)
+    return _summary(r, sid, tier, params, time.time() - t0)
+
+
+def _surface_values(params):
+    s = params.get("surface", 0.0)
+    vals = list(s.values()) if isinstance(s, dict) else [s]
+    ratio = params.get("surface_ratio")
+    if ratio and not isinstance(s, dict):
+        vals = [float(s) * float(v) for v in ratio.values()]
+    return [float(v) for v in vals]
+
+
+def refine_reason(row, when):
+    """2段目に回す理由（空文字なら回さない）"""
+    if when == "all":
+        return "all"
+    if when == "none":
+        return ""
+    reasons = []
+    if when.get("pile_yield") and row["n_yield"] > 0:
+        reasons.append("杭の降伏")
+    if "residual" in when:
+        lo, hi = when["residual"]
+        if lo <= abs(row["deck_residual"]) <= hi:
+            reasons.append("残留変位")
+    if not row["reached"]:
+        reasons.append("打ち切り")
+    return "・".join(reasons)
+
+
+# ============================================================ 一括実行
+class Batch:
+    """桟橋の入力（dict、scenarios を含む）からシナリオを作り、2段階で計算する"""
+
+    def __init__(self, data):
+        self.data = data
+        self.cfg = read_scenarios(data.get("scenarios"))
+        from .pier import Pier
+        d = copy.deepcopy(data)
+        d.pop("scenarios", None)
+        self.pier = Pier(d)                                 # 入力の確認と列名の対応用
+        self.scenarios = []
+        for params in scenario_params(self.cfg):
+            sid = scenario_id(params)
+            to_flow_case(self.pier, params, sid)            # 入力の誤りをここで検出
+            self.scenarios.append((sid, params))
+        seg = self.cfg["refine"]["segment"]
+        self.segments = {"screen": self.cfg["screening"]["segment"],
+                         "refine": seg if seg is not None else data["piles"].get("segment")}
+
+    def run(self, out=None, workers=None, log=print):
+        """全シナリオを計算する。out（拡張子なしのパス）があれば .jsonl に逐次追記し、.csv を書く。
+        戻り値: 結果の行のリスト（1段目・2段目の両方）"""
+        workers = workers or self.cfg["workers"]
+        done = {}
+        jl = Path(f"{out}.jsonl") if out else None
+        if jl and jl.exists():
+            for line in jl.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    row = json.loads(line)
+                    done[(row["id"], row["tier"])] = row
+        rows = []
+
+        def record(row):
+            rows.append(row)
+            if jl:
+                with jl.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        for tier in ("screen", "refine"):
+            todo = []
+            for sid, params in self.scenarios:
+                if tier == "refine":
+                    scr = next(r for r in rows if r["id"] == sid and r["tier"] == "screen")
+                    if not scr["refine_reason"]:
+                        continue
+                if (sid, tier) in done:
+                    rows.append(done[(sid, tier)])
+                else:
+                    todo.append((sid, params))
+            log(f"{tier}: 計算 {len(todo)} 件（計算済み {sum(1 for k in done if k[1] == tier)} 件）")
+            for row in self._map(todo, tier, workers):
+                if tier == "screen":
+                    row["refine_reason"] = refine_reason(row, self.cfg["refine"]["when"])
+                record(row)
+            # 計算済みの 1段目にも 2段目の判定を付け直す（条件を変えて再実行した場合）
+            if tier == "screen":
+                for r in rows:
+                    if r["tier"] == "screen":
+                        r["refine_reason"] = refine_reason(r, self.cfg["refine"]["when"])
+        if out:
+            write_csv(rows, f"{out}.csv")
+        return rows
+
+    def _map(self, todo, tier, workers):
+        """todo の各シナリオの結果の行を順に返す。1段目は ecu を使わないので、ecu 以外が同じシナリオは
+        1回だけ計算して結果を写す"""
+        groups = {}
+        for sid, params in todo:
+            key = scenario_id({k: v for k, v in params.items() if k != "ecu"}) if tier == "screen" else sid
+            groups.setdefault(key, []).append((sid, params))
+        reps = [g[0] for g in groups.values()]
+        if workers <= 1 or len(reps) <= 1:
+            results = (run_one(self.data, sid, params, tier, self.segments) for sid, params in reps)
+        else:
+            ex = ProcessPoolExecutor(max_workers=workers)
+            futs = [ex.submit(run_one, self.data, sid, params, tier, self.segments) for sid, params in reps]
+            results = (f.result() for f in futs)
+        try:
+            for g, row in zip(groups.values(), results):
+                for sid, params in g:
+                    yield {**row, "id": sid, "ecu": str(params.get("ecu", "A"))}
+        finally:
+            if workers > 1 and len(reps) > 1:
+                ex.shutdown()
+
+
+def write_csv(rows, path):
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="桟橋の利用可否シナリオの一括実行（利用可否 U4）")
+    ap.add_argument("input")
+    ap.add_argument("-o", "--out", default=None, help="出力の名前（.jsonl と .csv）。既定は入力名_scenarios")
+    ap.add_argument("-j", "--workers", type=int, default=None)
+    a = ap.parse_args(argv)
+    data = yaml.safe_load(Path(a.input).read_text(encoding="utf-8"))
+    out = a.out or str(Path(a.input).with_suffix("")) + "_scenarios"
+    b = Batch(data)
+    print(f"シナリオ {len(b.scenarios)} 件")
+    t0 = time.time()
+    rows = b.run(out, a.workers)
+    print(f"完了: {len(rows)} 行、{time.time() - t0:.1f} 秒 → {out}.jsonl, {out}.csv")
+
+
+if __name__ == "__main__":
+    main()

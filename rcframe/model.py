@@ -49,16 +49,29 @@ class Element:
 
     # ---- 解析時に計算されるキャッシュ ----
     def prepare(self, xi, xj):
-        # 形状・剛域・断面・ばねが前回と同じなら再計算しない（非線形解析の各ステップの高速化）
-        key = (tuple(xi), tuple(xj), self.beta, self.rigid_i, self.rigid_j, id(self.sec), id(self.mat),
-               self.shear_deform, None if self.springs is None else np.asarray(self.springs).tobytes())
+        # 形状・剛域（座標変換）と、断面・ばね（剛性）を分けてキャッシュし、変わった部分だけ再計算する
+        # （非線形解析の各ステップの高速化。ばねの柔性だけが変わる場合は座標変換を使い回す）
+        gkey = (tuple(xi), tuple(xj), self.beta, self.rigid_i, self.rigid_j)
+        if getattr(self, "_geom_key", None) != gkey:
+            self.R, self.L = local_axes(np.asarray(xi, float), np.asarray(xj, float), self.beta)
+            self.Lf = self.L - self.rigid_i - self.rigid_j
+            if self.Lf <= 0:
+                raise ValueError(f"要素 {self.id}: 剛域長が部材長以上です")
+            self.T = transformation_matrix(self.R)
+            self.H = rigid_zone_matrix(self.rigid_i, self.rigid_j)
+            self._geom_key = gkey
+            self._prep_key = None
+            self._k_cache = {}
+        key = (id(self.sec), id(self.mat), self.shear_deform,
+               None if self.springs is None else np.asarray(self.springs).tobytes())
         if getattr(self, "_prep_key", None) == key:
             return
         self._prep_key = key
-        self.R, self.L = local_axes(xi, xj, self.beta)
-        self.Lf = self.L - self.rigid_i - self.rigid_j
-        if self.Lf <= 0:
-            raise ValueError(f"要素 {self.id}: 剛域長が部材長以上です")
+        # 直近の剛性を数個保持する（崩壊機構の判定でばねを解放した剛性と交互に使う場合など）
+        cache = self.__dict__.setdefault("_k_cache", {})
+        if key in cache:
+            self.k_flex, self.k_global, self.k_face = cache[key]
+            return
         s, m = self.sec, self.mat
         args = (m.E, m.G, s.A, s.Iy, s.Iz, s.J, self.Lf,
                 s.Asy if self.shear_deform else None,
@@ -67,10 +80,12 @@ class Element:
             self.k_flex = local_stiffness(*args)
         else:
             self.k_flex = local_stiffness_springs(*args, fs=self.springs)
-        self.T = transformation_matrix(self.R)
-        self.H = rigid_zone_matrix(self.rigid_i, self.rigid_j)
         k_node = self.H.T @ self.k_flex @ self.H
         self.k_global = self.T.T @ k_node @ self.T
+        self.k_face = self.k_flex @ self.H @ self.T          # 全体座標の材端変位 → 材端力（フェイス位置）
+        if len(cache) >= 4:
+            cache.pop(next(iter(cache)))
+        cache[key] = (self.k_flex, self.k_global, self.k_face)
 
 
 class Model:
@@ -168,7 +183,8 @@ class Model:
         idx, n = self._index()
         elems = list(self.elements.values())
         for e in elems:
-            e.prepare(self.nodes[e.ni].xyz, self.nodes[e.nj].xyz)
+            ni, nj = self.nodes[e.ni], self.nodes[e.nj]
+            e.prepare((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
         # 自由度番号の配列は、節点・要素・節点ばねの構成が同じなら使い回す（非線形解析の高速化）
         key = (tuple(idx), tuple((e.id, e.ni, e.nj) for e in elems), tuple(self.node_springs))
         if getattr(self, "_asm_key", None) != key:

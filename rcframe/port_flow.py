@@ -187,9 +187,13 @@ class FlowResult:
             print(f"  [注意] {w}")
 
 
-def run_flow(pier, case, results=None):
-    """側方流動のシナリオ case（FlowCase）を解析する"""
-    if pier.pile_model != "soil_spring":
+def run_flow(pier, case, results=None, hinge_opt=None):
+    """側方流動のシナリオ case（FlowCase）を解析する
+
+    hinge_opt: 杭のヒンジの設定（level2.pile_hinge と同じ形式）。省略時は pier.level2["pile_hinge"]
+    地盤変位が 0 のシナリオ（慣性力のみ）は仮想固定点モデルでも解析できる（一括実行のふるい分け用）
+    """
+    if pier.pile_model != "soil_spring" and any(v != 0 for v in case.surface.values()):
         raise ValueError("側方流動の解析には地盤ばねモデル（piles.model: soil_spring）が必要です")
     if "地震用" not in pier.weights or pier.master() is None:
         raise ValueError("側方流動: 地震用重量（actions の D, Ls）と上部工の剛床が必要です")
@@ -208,7 +212,7 @@ def run_flow(pier, case, results=None):
     # 地中部のヒンジは全ての分割点に置く（流動層の下端付近で全塑性になりうるため）
     caps = {}
     hinges, labels, kinds, warns = build_pile_hinges(pier, rG, plane, opt["post_yield_ratio"], math.inf,
-                                                     opt["pile_hinge"], caps)
+                                                     hinge_opt or opt["pile_hinge"], caps)
     pattern, W = inertia_pattern(pier, d, sign * (1 if case.kh >= 0 else -1))
     saved = {nid: k.copy() for nid, k in m.node_springs.items()}
     ns, nlabels, ground = {}, {}, []
