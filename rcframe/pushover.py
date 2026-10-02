@@ -57,6 +57,7 @@ class PushoverResult:
     mechanism_stories: list = field(default_factory=list)   # 機構で変形が集中する層
     states: dict = field(default_factory=dict)    # step -> (変位, {eid: 可撓部端の材端力})（keep_states 時）
     hinge_theta: dict = field(default_factory=dict)   # step -> {ばね: 回転角}（keep_states 時）
+    hinge_M: dict = field(default_factory=dict)       # step -> {ばね: モーメント}（keep_states 時）
 
     @property
     def lateral(self):
@@ -112,7 +113,7 @@ class Incremental:
     shear_caps    : {(eid, 面): Qsu}  水平載荷中に |Q| が Qsu に達したら「せん断破壊」の事象
     mechanism_check: 降伏したばねを解放（ピン）した接線剛性で水平外力に対して不安定になったら
                     崩壊機構の形成とする（res.mechanism_step, res.mechanism_stories）
-    keep_states   : 各ステップの変位・部材端力を res.states、ばねの回転角を res.hinge_theta に保存
+    keep_states   : 各ステップの変位・部材端力を res.states、ばねの回転角・モーメントを res.hinge_theta・res.hinge_M に保存
     node_springs  : {(節点, 自由度): EPSpring}  非線形の節点ばね（地盤ばね）。各ステップの接線剛性を
                     model.node_springs[節点][自由度] に設定する（呼び出し側で元の値に戻すこと）
     lateral_total : 基準の水平外力パターンの d 方向の合計（ベースシア Q = 正味の荷重係数 × これ）
@@ -387,7 +388,7 @@ class Incremental:
                     rel = {}
                     for key, h in hinges.items():
                         flex, lim, kind = h.tangent(self.sigma[key])
-                        if kind == "post":                       # 降伏後の分岐 → 解放（ピン）
+                        if kind.startswith("post"):              # 降伏後の分岐 → 解放（ピン）
                             flex = 1e6 / h.sk[self.sigma[key]].ks3
                         rel[key] = (flex, lim, kind)
                     try:
@@ -404,6 +405,7 @@ class Incremental:
             if self.keep_states:
                 res.states[step] = (self.u.copy(), {eid: self.face[eid].copy() for eid in E})
                 res.hinge_theta[step] = {key: h.theta for key, h in hinges.items()}
+                res.hinge_M[step] = {key: h.M for key, h in hinges.items()}
             if lam_target is not None and lam >= lam_target - 1e-12 * max(1.0, abs(lam_target)):
                 break
             if max_drift is not None and drift_now >= max_drift * (1 - 1e-9):

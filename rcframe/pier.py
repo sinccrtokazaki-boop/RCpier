@@ -526,7 +526,7 @@ class Pier(GridMixin):
     def _read_level2(self, d):
         """レベル2地震動のプッシュオーバーの設定（要求側と判定基準は入力）"""
         keys = ("directions", "gravity", "kh", "target_displacement", "max_displacement", "step",
-                "post_yield_ratio", "inground_depth", "criteria")
+                "post_yield_ratio", "inground_depth", "criteria", "pile_hinge")
         _check_keys(d, keys, "level2")
         cases = set(self.cases)
         dirs = [str(x) for x in _as_list(d.get("directions", ["+y", "-y"]))]
@@ -548,18 +548,21 @@ class Pier(GridMixin):
             raise InputError("level2: kh（照査用震度）と target_displacement（要求変位）のどちらか一方を指定してください")
         crit = []
         for c in d.get("criteria") or []:
-            if c in ("no_mechanism", "no_inground_plastic"):
+            if c in ("no_mechanism", "no_inground_plastic", "no_local_buckling"):
                 crit.append(c)
             elif isinstance(c, dict) and set(c) == {"pile_rotation"}:
                 crit.append({"pile_rotation": _num(c["pile_rotation"], "level2.criteria.pile_rotation")})
             else:
-                raise InputError(f"level2.criteria: no_mechanism, no_inground_plastic, "
+                raise InputError(f"level2.criteria: no_mechanism, no_inground_plastic, no_local_buckling, "
                                  f"{{pile_rotation: 値}} から指定してください: {c!r}")
         r = _num(d.get("post_yield_ratio", 0.001), "level2.post_yield_ratio")
         if not 0 < r < 1:
             raise InputError("level2.post_yield_ratio: 0 < r < 1 としてください")
+        ph = self._read_pile_hinge(d.get("pile_hinge") or {})
+        if "no_local_buckling" in crit and ph["model"] != "fiber":
+            raise InputError("level2.criteria: no_local_buckling には pile_hinge.model: fiber が必要です")
         self.level2 = {
-            "given": bool(d), "directions": dirs, "gravity": [str(c) for c in grav],
+            "given": bool(d), "pile_hinge": ph, "directions": dirs, "gravity": [str(c) for c in grav],
             "kh": kh, "target_displacement": td,
             "max_displacement": _num(d.get("max_displacement", 1.0), "level2.max_displacement") * M,
             "step": _num(d.get("step", 0.005), "level2.step") * M,
@@ -567,6 +570,27 @@ class Pier(GridMixin):
             "inground_depth": _num(d.get("inground_depth", 3.0), "level2.inground_depth"),
             "criteria": crit,
         }
+
+    @staticmethod
+    def _read_pile_hinge(d):
+        """杭の塑性ヒンジの設定: model = cos（Mp(N) の cos 式、既定）/ fiber（ファイバーの M–φ、利用可否 U3）"""
+        _check_keys(d, ("model", "ecu", "hardening", "hinge_length"), "level2.pile_hinge")
+        model = str(d.get("model", "cos"))
+        if model not in ("cos", "fiber"):
+            raise InputError("level2.pile_hinge.model: cos または fiber です")
+        e = d.get("ecu", "A")
+        if str(e) in ("A", "B"):
+            ecu = (str(e), None)
+        else:
+            v = _num(e, "level2.pile_hinge.ecu")
+            if v <= 0:
+                raise InputError("level2.pile_hinge.ecu: A, B または正の値（局部座屈ひずみ）です")
+            ecu = ("value", v)
+        h = _num(d.get("hardening", 0.01), "level2.pile_hinge.hardening")
+        lp = _num(d.get("hinge_length", 1.0), "level2.pile_hinge.hinge_length")
+        if not 0 <= h < 1 or lp <= 0:
+            raise InputError("level2.pile_hinge: 0 ≦ hardening < 1、hinge_length > 0 としてください")
+        return {"model": model, "ecu": ecu, "hardening": h, "hinge_length": lp}
 
     @property
     def cases(self):

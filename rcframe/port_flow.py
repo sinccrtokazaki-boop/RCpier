@@ -21,7 +21,7 @@ import numpy as np
 
 from .grid import InputError, _check_keys, _num
 from .hinge import EPSpring
-from .port_level2 import build_pile_hinges, inertia_pattern
+from .port_level2 import build_pile_hinges, inertia_pattern, pile_damage
 from .pushover import Incremental, Level, _parse_direction
 from .results import Result
 
@@ -129,6 +129,7 @@ class FlowResult:
     soil_force: dict = field(default_factory=dict)    # 節点 -> 地盤ばねの力 k·(u − ug)（載荷方向、最終状態）
     ground: dict = field(default_factory=dict)        # 節点 -> 与えた地盤変位 [mm]（最終状態）
     final: object = None                              # Result（最終状態の部材端力・変位）
+    caps: dict = field(default_factory=dict)          # ばね -> PileCapacity（level2.pile_hinge.model: fiber）
     warnings: list = field(default_factory=list)
 
     @property
@@ -145,6 +146,21 @@ class FlowResult:
         k = max(vals, key=vals.get)
         return vals[k], self.labels[k]
 
+    def damage(self, residual=False):
+        """杭の損傷の一覧（port_level2.pile_damage）。residual: 最終状態、既定: 履歴中で最も厳しい状態
+        （各ヒンジで |θ| が最大、θ = 0 のままなら |M| が最大のステップ）"""
+        if not self.caps:
+            return []
+        h = self.inc.hinges
+        if residual:
+            return pile_damage(self.caps, h, self.labels, self.kinds)
+        res = self.inc.res
+        th, mm = {}, {}
+        for k in self.caps:
+            s = max(res.hinge_theta, key=lambda st: (abs(res.hinge_theta[st][k]), abs(res.hinge_M[st][k])))
+            th[k], mm[k] = res.hinge_theta[s][k], res.hinge_M[s][k]
+        return pile_damage(self.caps, h, self.labels, self.kinds, th, mm)
+
     def print(self):
         c = self.case
         print(f"\n■ 側方流動 {c.name}  方向 {c.direction}、分布 {c.shape}、層厚 {c.depth / M:g} m、"
@@ -159,6 +175,11 @@ class FlowResult:
             v, lab = self.max_rotation(kind)
             r, _ = self.max_rotation(kind, residual=True)
             print(f"  {kind}の塑性回転角: 最大 {v:.4f} rad、残留 {r:.4f} rad（{lab or '-'}）")
+        dm = self.damage()
+        if dm:
+            cnt = {lv: sum(r["level"] == lv for r in dm) for lv in ("局部座屈", "塑性化", "弾性")}
+            print(f"  杭の損傷（最大時）: 局部座屈 {cnt['局部座屈']}、塑性化 {cnt['塑性化']}、弾性 {cnt['弾性']}"
+                  f"（最大ひずみ {dm[0]['strain']:.5f}、{dm[0]['label']}）")
         ys = [s for s in self.soil.values() if s.yielded]
         if self.soil:
             print(f"  地盤ばねの降伏: {len(ys)} / {len(self.soil)}")
@@ -185,7 +206,9 @@ def run_flow(pier, case, results=None):
             res[c] = m.analyze(c)
     rG = Result.combine("+".join(gcases), {res[c]: 1.0 for c in gcases})
     # 地中部のヒンジは全ての分割点に置く（流動層の下端付近で全塑性になりうるため）
-    hinges, labels, kinds, warns = build_pile_hinges(pier, rG, plane, opt["post_yield_ratio"], math.inf)
+    caps = {}
+    hinges, labels, kinds, warns = build_pile_hinges(pier, rG, plane, opt["post_yield_ratio"], math.inf,
+                                                     opt["pile_hinge"], caps)
     pattern, W = inertia_pattern(pier, d, sign * (1 if case.kh >= 0 else -1))
     saved = {nid: k.copy() for nid, k in m.node_springs.items()}
     ns, nlabels, ground = {}, {}, []
@@ -207,7 +230,7 @@ def run_flow(pier, case, results=None):
     levels = [Level("上部工", None, pier.master(), 1.0)]                 # 「層間変形角」= 上部工の変位 [mm]
     inc = Incremental(m, hinges, levels, d, labels, mechanism_check=True, keep_states=True,
                       node_springs=ns, node_labels=nlabels, lateral_total=W)
-    out = FlowResult(case, inc, W, kinds=kinds, labels=labels, soil=ns, warnings=list(warns))
+    out = FlowResult(case, inc, W, kinds=kinds, labels=labels, soil=ns, caps=caps, warnings=list(warns))
     kh = abs(case.kh)
     try:
         inc.run("長期", cases=gcases, lam_target=1.0)

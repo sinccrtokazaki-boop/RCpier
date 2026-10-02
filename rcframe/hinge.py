@@ -84,26 +84,46 @@ class Hinge:
 class BilinearHinge:
     """鋼材の材端ばね: 剛塑性 + 線形硬化（移動硬化、バイリニア型の履歴）
 
-    降伏線 M = ±My + ks3·θ（skeleton の My, ks3）。降伏線の間（|M − ks3·θ| < My）ではばね剛
-    （部材は弾性的に応答）。除荷すると 2My の幅を剛のまま戻り、反対側の降伏線に達すると再降伏する。
+    降伏線 M = ±My + g(θ)（skeleton の My）。g は硬化の関数で、|θ| ≦ θu では勾配 ks3、|θ| > θu では
+    勾配 ks4（局部座屈後、θu・ks4 を与えたとき。省略時は全域 ks3）。降伏線の間（|M − g(θ)| < My）では
+    ばね剛（部材は弾性的に応答）。除荷すると 2My の幅を剛のまま戻り、反対側の降伏線に達すると再降伏する。
     単調載荷では Hinge（バイリニア骨格 Mc = My）と同じ経路。Hinge と同じ使い方（tangent / advance）
     """
 
-    def __init__(self, sk):
+    def __init__(self, sk, theta_u=None, ks4=None):
         if sk.theta_y != 0:
             raise ValueError("BilinearHinge は Mc = My のバイリニア骨格（Skeleton.from_member(Mp, Mp, ...)）です")
         self.sk = {1: sk, -1: sk}
         self.My, self.ks3 = sk.My, sk.ks3
+        self.theta_u = math.inf if theta_u is None else theta_u
+        self.ks4 = sk.ks3 if ks4 is None else ks4
         self.theta = 0.0
         self.M = 0.0
         self.cracked = {1: False, -1: False}
         self.yielded = {1: False, -1: False}
+        self.buckled = {1: False, -1: False}           # θu を越えた（局部座屈）
         self.tolM = 1e-9 * sk.My
+        self.tolT = 1e-12 + 1e-9 * (0.0 if math.isinf(self.theta_u) else self.theta_u)
+
+    def g(self, th):
+        """降伏線の中心（移動硬化の背応力）"""
+        tu = self.theta_u
+        if abs(th) <= tu:
+            return self.ks3 * th
+        return math.copysign(self.ks3 * tu + self.ks4 * (abs(th) - tu), th)
 
     def tangent(self, sigma):
-        back = self.ks3 * self.theta                         # 降伏線の中心（移動硬化）
+        back = self.g(self.theta)
         if sigma * (self.M - back) >= self.My - self.tolM:
-            return 1.0 / self.ks3, sigma * math.inf, "post"
+            th, tu = self.theta, self.theta_u
+            # θ は sigma の向きに進む。次の折れ点（|θ| = θu）までの勾配と、そこでのモーメント
+            if math.isinf(tu):
+                return 1.0 / self.ks3, sigma * math.inf, "post"
+            if sigma * th >= tu - self.tolT:                    # 外側（局部座屈後）へ
+                return 1.0 / self.ks4, sigma * math.inf, "post"
+            if sigma * th < -tu - self.tolT:                    # 反対側の座屈域から戻る（勾配 ks4）
+                return 1.0 / self.ks4, sigma * self.My + self.g(-sigma * tu), "post_b"
+            return 1.0 / self.ks3, sigma * self.My + self.g(sigma * tu), "post_u"
         return 0.0, back + sigma * self.My, "elastic"
 
     def advance(self, dM, flex, sigma, hit=False, limit=None, kind=None):
@@ -111,15 +131,23 @@ class BilinearHinge:
         self.M += dM
         if hit:
             self.M = limit
+            if kind == "post_u":
+                self.theta = sigma * self.theta_u
+            elif kind == "post_b":
+                self.theta = -sigma * self.theta_u
         events = []
-        if not self.yielded[sigma] and sigma * (self.M - self.ks3 * self.theta) >= self.My - self.tolM:
+        if not self.yielded[sigma] and sigma * (self.M - self.g(self.theta)) >= self.My - self.tolM:
             self.yielded[sigma] = True
             self.cracked[sigma] = True
             events.append("降伏")
+        if not self.buckled[sigma] and sigma * self.theta >= self.theta_u - self.tolT:
+            self.buckled[sigma] = True
+            events.append("局部座屈")
         return events
 
     @property
     def state(self):
+        """表示用の状態（"弾性" / "降伏"）。局部座屈は buckled と事象「局部座屈」で示す"""
         return "降伏" if any(self.yielded.values()) else "弾性"
 
 

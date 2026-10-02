@@ -42,6 +42,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 地盤ばね: Model.add_node_spring（対角ばね）、Result.spring_forces。pushover の node_springs で非線形化
 - Element.prepare は形状・ばねが変わらなければ再計算しない（_prep_key）
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
+- `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
 - `rcframe/port_flow.py` : 側方流動のシナリオ（FlowCase、run_flow）。地盤変位は Incremental.run の ground（等価節点力 k·Δug）
 - `rcframe/pier_report.py`: 桟橋の計算書（章立て SECTIONS）。report.assemble_html・viewer_html を共通に使う。
   report.build_report / write_report は Pier を自動で振り分ける
@@ -76,7 +77,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P3 済: 照査 → P4 済: レベル2（地盤ばね・プッシュオーバー）→ P5 済: 計算書（HTML）
 
 ## 利用可否シナリオのロードマップ（README.md 参照、直杭式横桟橋のみ、各段階はユーザー承認後に着手）
-U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位入力（側方流動）→ U3: ファイバー M–φ
+U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位入力（側方流動）→ U3 済: ファイバー M–φ
 → U4: 一括実行（2段階）→ U5: 許容荷重・超過確率 → U6: 判定カード（HTML）
 
 ## 既知の簡略化
@@ -94,3 +95,5 @@ U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位�
 - 桟橋のレベル2: 杭の軸力は長期で固定、載荷方向の曲げ面のみ、上部工の梁は弾性（M ≦ Mu を確認）
 - 側方流動: 地盤変位は列ごとに海底面からの深さの関数（流動方向の 1成分）、低減係数は ζ < H の節点のばねに一律、
   分布・低減係数・載荷順序は入力（FLIP・基準で要確認）
+- ファイバーのヒンジ: My〜Mu を直線（θu = (φu − φy)·Lp）、局部座屈後の耐力低下なし、軸力は長期で固定（0.5%Ny 刻み）
+- 照合が必要（U3）: fiber.VERIFY_ITEMS（εcu の式A・式B）
