@@ -14,27 +14,31 @@ materials:
   STK50: {steel: true, fy: 315}     # STK50（現 STK490 相当）の降伏点
 
 sections:
-  GX:                               # 法線平行方向の梁 G1〜G4（図52〜54: 幅 1.0 m、せい 1.5 m + ハンチ）
+  # 梁の配筋は図55・56（法線直角方向 G5〜G9）の平面図 B−B（上端）・C−C（下端）と断面 a−a〜g−g から読み取り:
+  #   幅 1,000 に主筋 9 本（8@100）。上端: 端部 D22 ×5 + D19 ×4、中央 D22 ×5（D22×10,000 の通し筋）
+  #   下端: 端部 D25 ×5 + D22 ×4（杭頭部に定着）、中央 D22 ×5 + D16 ×4。スキャンのため本数・径は概略
+  # せいは支間中央 1,500、杭位置 1,800（図55 Sect. A−A）。解析・Mu は安全側に 1,500 とする
+  GY:                               # 法線直角方向の梁 G5〜G9
     b: 1000
-    D: 1800
+    D: 1500
     material: C24
     cover: 100
-    rebar:                          # 仮定: 図52〜54 の主筋（D22・D19）を概略で読んだ値
-      main: SD295                   # SD30 相当
+    rebar:
+      main: SD295                   # SD30 相当（仮定）
       shear: SD295
       dt: 120
-      end:    {top: 7-D22, bottom: 7-D19, stirrup: 4-D13@200}
-      center: {top: 5-D22, bottom: 7-D19, stirrup: 4-D13@300}
-  GY:                               # 法線直角方向の梁 G5〜G9（図55〜56: 幅 1.0 m、せい 1.8 m）
+      end:    {top: 8-D22, bottom: 8-D25, stirrup: 4-D13@200}   # 断面積の等しい 1 種の径に換算（D22×5+D19×4、D25×5+D22×4）
+      center: {top: 5-D22, bottom: 7-D22, stirrup: 4-D13@300}   # D22×5+D16×4 を換算
+  GX:                               # 法線平行方向の梁 G1〜G4（図52〜54）。配筋は判読が難しいため GY と同じとする
     b: 1000
-    D: 1800
+    D: 1500
     material: C24
     cover: 100
-    rebar:                          # 仮定: 図55〜56 の主筋（D22・D25・D19）を概略で読んだ値
+    rebar:
       main: SD295
       shear: SD295
       dt: 120
-      end:    {top: 7-D25, bottom: 7-D22, stirrup: 4-D13@200}
+      end:    {top: 8-D22, bottom: 8-D25, stirrup: 4-D13@200}
       center: {top: 5-D22, bottom: 7-D22, stirrup: 4-D13@300}
   P12:
     pipe: {D: 1000, t: 12}          # 図11: 陸側 3 列 φ1000 t12（STK50）
