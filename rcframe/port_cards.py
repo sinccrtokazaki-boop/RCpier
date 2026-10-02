@@ -101,8 +101,9 @@ def damage_frame(pier, fr, levels, width=720):
     span = [g for _, g in (pier.gy if d == 1 else pier.gx)]
     u_lo, u_hi = min(span) - 3000, max(span) + 3000
     umax = max([abs(du[6 * idx[n] + d]) for n in m.nodes] + [abs(fr.inc.ug[6 * idx[n] + d]) for n in m.nodes]
-               + [1e-9])
+               + [1.0])                                   # 1 mm 未満は拡大しない
     scale = 0.15 * (u_hi - u_lo) / umax                     # 最大の変位を全幅の 15% で描く
+    scale = float(f"{scale:.1g}") if scale >= 1 else 1.0    # 見やすい倍率に丸める
     ext = [scale * v for v in list(du[d::6]) + list(fr.inc.ug[d::6])]
     V = View(u_lo + min(ext + [0.0]), u_hi + max(ext + [0.0]), zb, pier.deck_top, width=width,
              margin=(30, 40, 34, 60), max_height=620)
