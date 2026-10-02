@@ -26,17 +26,21 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from .grid import InputError, _check_keys, _num
 from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
+from .port_usability import judge, usability_row
 
 M = 1e3
 PARAMS = FLOW_KEYS + ("ecu", "surface_ratio")       # シナリオの変数（grid・base に書ける）
 COLUMNS = ["id", "tier", "direction", "surface", "depth", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
            "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain",
-           "soil_yield", "refine_reason", "seconds"]
+           "soil_yield", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
+           "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds"]
+DISTS = ("lognormal", "normal", "uniform", "choice")
 
 
 # ============================================================ シナリオの生成
@@ -44,10 +48,12 @@ def read_scenarios(d):
     """scenarios の設定を読む。戻り値: dict(base, grid, sample, seed, screening, refine, workers)"""
     if not d:
         raise InputError("scenarios がありません")
-    _check_keys(d, ("base", "grid", "sample", "seed", "screening", "refine", "workers"), "scenarios")
+    _check_keys(d, ("base", "grid", "distributions", "sample", "seed", "screening", "refine", "workers"),
+                "scenarios")
     base = dict(d.get("base") or {})
     grid = dict(d.get("grid") or {})
-    for what, src in (("base", base), ("grid", grid)):
+    dists = dict(d.get("distributions") or {})
+    for what, src in (("base", base), ("grid", grid), ("distributions", dists)):
         _check_keys(src, PARAMS, f"scenarios.{what}")
     for k, v in grid.items():
         if not isinstance(v, list) or not v:
@@ -55,6 +61,13 @@ def read_scenarios(d):
     sample = d.get("sample")
     if sample is not None and (not isinstance(sample, int) or sample <= 0):
         raise InputError("scenarios.sample: 正の整数です")
+    if dists:
+        if grid:
+            raise InputError("scenarios: grid と distributions はどちらか一方です")
+        if sample is None:
+            raise InputError("scenarios.distributions には sample（抽出する数）が必要です")
+        for k, v in dists.items():
+            _read_dist(v, f"scenarios.distributions.{k}")
     scr = dict(d.get("screening") or {})
     _check_keys(scr, ("segment",), "scenarios.screening")
     ref = d.get("refine", {"when": {"pile_yield": True}})
@@ -68,14 +81,58 @@ def read_scenarios(d):
             lo, hi = (_num(x, "scenarios.refine.when.residual") for x in when["residual"])
             if not 0 <= lo < hi:
                 raise InputError("scenarios.refine.when.residual: [下限, 上限]（m、下限 < 上限）です")
-    return dict(base=base, grid=grid, sample=sample, seed=int(d.get("seed", 1)),
+    return dict(base=base, grid=grid, dists=dists, sample=sample, seed=int(d.get("seed", 1)),
                 screening=dict(segment=_num(scr.get("segment", 1.0), "scenarios.screening.segment")),
                 refine=dict(when=when, segment=ref.get("segment")),
                 workers=int(d.get("workers", 1)))
 
 
+def _read_dist(v, what):
+    """確率分布の指定 {lognormal: {median, beta}} / {normal: {mean, sd}} / {uniform: [a, b]} /
+    {choice: [値...], p: [確率...]}（p は省略可）"""
+    if not isinstance(v, dict) or not (set(v) & set(DISTS)):
+        raise InputError(f"{what}: {', '.join(DISTS)} のいずれかで指定してください")
+    _check_keys(v, DISTS + ("p",), what)
+    kind = next(k for k in DISTS if k in v)
+    a = v[kind]
+    if kind == "lognormal":
+        _check_keys(a, ("median", "beta"), what)
+        if _num(a["median"], what) <= 0 or _num(a["beta"], what) <= 0:
+            raise InputError(f"{what}: median, beta は正の値です")
+    elif kind == "normal":
+        _check_keys(a, ("mean", "sd"), what)
+        if _num(a["sd"], what) <= 0:
+            raise InputError(f"{what}: sd は正の値です")
+    elif kind == "uniform":
+        if not isinstance(a, list) or len(a) != 2 or _num(a[0], what) >= _num(a[1], what):
+            raise InputError(f"{what}: uniform は [下限, 上限] です")
+    else:
+        if not isinstance(a, list) or not a:
+            raise InputError(f"{what}: choice は候補のリストです")
+        if "p" in v and (len(v["p"]) != len(a) or abs(sum(v["p"]) - 1) > 1e-9):
+            raise InputError(f"{what}: p は候補と同じ数で、合計 1 です")
+    return kind, a
+
+
+def _draw(rng, v):
+    kind, a = _read_dist(v, "")
+    if kind == "lognormal":
+        return float(a["median"] * math.exp(a["beta"] * rng.standard_normal()))
+    if kind == "normal":
+        return float(a["mean"] + a["sd"] * rng.standard_normal())
+    if kind == "uniform":
+        return float(rng.uniform(a[0], a[1]))
+    i = rng.choice(len(a), p=v.get("p"))
+    return a[int(i)]
+
+
 def scenario_params(cfg):
-    """grid の組合せ（sample があれば無作為に抽出）を [dict] で返す。各 dict は base に grid の値を重ねたもの"""
+    """シナリオの変数の [dict]。各 dict は base に grid の組合せ（sample があれば無作為に抽出）、
+    または distributions から抽出した値（sample 個、seed で再現）を重ねたもの"""
+    if cfg.get("dists"):
+        rng = np.random.default_rng(cfg["seed"])
+        keys = sorted(cfg["dists"])
+        return [{**cfg["base"], **{k: _draw(rng, cfg["dists"][k]) for k in keys}} for _ in range(cfg["sample"])]
     keys = list(cfg["grid"])
     combos = [dict(zip(keys, vals)) for vals in itertools.product(*(cfg["grid"][k] for k in keys))]
     if cfg["sample"] is not None and cfg["sample"] < len(combos):
@@ -162,7 +219,13 @@ def run_one(data, sid, params, tier, segments):
     if tier == "refine":
         hinge["ecu"] = ecu
     r = run_flow(pier, case, hinge_opt=hinge)
-    return _summary(r, sid, tier, params, time.time() - t0)
+    row = _summary(r, sid, tier, params, time.time() - t0)
+    if pier.usability:                                   # 許容荷重と判定（U5）
+        row.update(usability_row(pier, r, pier.usability))
+        row["status"], reasons = judge(row, pier.usability)
+        row["reasons"] = " / ".join(reasons)
+        row["seconds"] = round(time.time() - t0, 2)
+    return row
 
 
 def _surface_values(params):
@@ -300,6 +363,9 @@ def main(argv=None):
     t0 = time.time()
     rows = b.run(out, a.workers)
     print(f"完了: {len(rows)} 行、{time.time() - t0:.1f} 秒 → {out}.jsonl, {out}.csv")
+    if b.pier.usability:
+        from .port_usability import print_summary, probability_summary
+        print_summary(probability_summary(rows, b.pier.usability), b.pier.usability)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ class Pier(GridMixin):
     """
     TOP_KEYS = ("type", "name", "materials", "sections", "grids", "deck", "beams", "piles",
                 "loads", "report", "unit_weight", "actions", "combinations", "checks", "level2",
-                "lateral_flow", "scenarios")                 # scenarios は一括実行（port_batch）が読む
+                "lateral_flow", "scenarios", "usability")    # scenarios は一括実行（port_batch）が読む
 
     def __init__(self, data: dict):
         _check_keys(data, self.TOP_KEYS, "トップレベル")
@@ -71,6 +71,8 @@ class Pier(GridMixin):
         self.weights = {}          # ケース -> (重量 [N], xg, yg)、"地震用" = D + Ls
         self.seismic = None        # レベル1地震動の設定と地震用重量
         self.fenders, self.bollards = [], []   # 防舷材・係船柱の位置 x [mm]（図用）
+        self.fender_specs = []           # [(作用点 [x, y, z] mm, 摩擦係数)]（許容荷重の算定用）
+        self.bollard_specs = []          # [(x mm, 水平角, 鉛直角)]
         if data.get("actions"):
             self._generate_actions(data["actions"])
         for case, spec in (data.get("loads") or {}).items():   # 手入力の荷重は加算
@@ -80,6 +82,8 @@ class Pier(GridMixin):
         self._read_level2(data.get("level2") or {})
         from .port_flow import read_flow_cases          # 側方流動のシナリオ（U2）
         self.lateral_flow = read_flow_cases(self, data.get("lateral_flow"))
+        from .port_usability import read_usability       # 利用可否の判定・許容荷重（U5）
+        self.usability = read_usability(self, data.get("usability"))
 
     # ============================================================ 読み込み
     def _read_materials(self, mats):
@@ -421,6 +425,7 @@ class Pier(GridMixin):
                 P = [_num(f["x"], what) * M, y_face, _num(f["z"], what) * M]
                 self._point_load("B", P, [mu * R, -R, 0.0], what)
                 self.fenders.append(P[0])
+                self.fender_specs.append((P, mu))
         # ---- T: 牽引力（係船柱は上部工の海側前面・天端）
         if a.get("T") is not None:
             _check_keys(a["T"], ("bollards",), "actions.T")
@@ -434,6 +439,8 @@ class Pier(GridMixin):
                                   _num(b.get("angle_v", 0), what))
                 self._point_load("T", [_num(b["x"], what) * M, y_face, self.deck_top], F, what)
                 self.bollards.append(_num(b["x"], what) * M)
+                self.bollard_specs.append((_num(b["x"], what) * M, _num(b.get("angle_h", 0), what),
+                                           _num(b.get("angle_v", 0), what)))
         # ---- 重量と重心（地震用: D + Ls）
         tot = WeightSum()
         for c, ws in wsum.items():

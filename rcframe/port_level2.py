@@ -287,6 +287,33 @@ def run_level2(pier, direction="+y", results=None):
     return out
 
 
+def deck_sections(pier):
+    """上部工の梁の照査断面（杭の前面・中央）と曲げ耐力 Mu（示方書、材料係数 1.0）
+    戻り値: [dict(eid, x, Mu_pos, Mu_neg, label)]。M ≧ 0（deck_moment の符号）は上端圧縮"""
+    m = pier.model
+    out = []
+    pile_at = {pier.node_ids[ij]: sec for ij, (sec, _) in pier.pile_sec.items()}
+    for key, eid in pier.elem_ids.items():
+        if key[0] in ("p", "pg"):
+            continue
+        e = m.elements[eid]
+        rb, s = e.sec.rebar, e.sec
+        if rb is None:
+            continue
+        ri = pile_at[e.ni].D / 2 if e.ni in pile_at else 0.0
+        rj = pile_at[e.nj].D / 2 if e.nj in pile_at else 0.0
+        for x, bars in ((ri, rb.end), (e.L / 2, rb.center), (e.L - rj, rb.end)):
+            mu = {sg: jsce_mu(s.b, s.D, c.area, tn.area, rb.dt, rb.dt, e.mat.fck, rb.main.F, rb.main.F)
+                  for sg, c, tn in ((1, bars.top, bars.bottom), (-1, bars.bottom, bars.top))}
+            out.append(dict(eid=eid, x=x, Mu_pos=mu[1], Mu_neg=mu[-1], label=pier.label("elem", eid)))
+    return out
+
+
+def deck_moment(result, sec):
+    """deck_sections の断面の曲げモーメント（上端圧縮を正）"""
+    return -result.section_forces_at(sec["eid"], sec["x"])[4]
+
+
 def _evaluate(pier, out, opt, gcases, res):
     """要求点の評価と判定"""
     po = out.po
@@ -359,25 +386,13 @@ def _evaluate(pier, out, opt, gcases, res):
     for eid in f1:
         f = f0[eid] + t * (f1[eid] - f0[eid])
         forces[eid] = {"face": f, "node": f}
-    disp_n = {}
-    rr = Result(m, "L2 要求点", disp_n, forces, {}, {c: 1.0 for c in gcases})
+    rr = Result(m, "L2 要求点", {}, forces, {}, {c: 1.0 for c in gcases})
     worst = (0.0, "")
-    pile_at = {pier.node_ids[ij]: sec for ij, (sec, _) in pier.pile_sec.items()}
-    for key, eid in pier.elem_ids.items():
-        if key[0] in ("p", "pg"):
-            continue
-        e = m.elements[eid]
-        rb, s = e.sec.rebar, e.sec
-        if rb is None:
-            continue
-        ri = pile_at[e.ni].D / 2 if e.ni in pile_at else 0.0
-        rj = pile_at[e.nj].D / 2 if e.nj in pile_at else 0.0
-        for x, bars in ((ri, rb.end), (e.L / 2, rb.center), (e.L - rj, rb.end)):
-            M = -rr.section_forces_at(eid, x)[4]
-            comp, tens = (bars.top, bars.bottom) if M >= 0 else (bars.bottom, bars.top)
-            Mu = jsce_mu(s.b, s.D, comp.area, tens.area, rb.dt, rb.dt, e.mat.fck, rb.main.F, rb.main.F)
-            if abs(M) / Mu > worst[0]:
-                worst = (abs(M) / Mu, pier.label("elem", eid))
+    for s in deck_sections(pier):
+        M = deck_moment(rr, s)
+        ratio = abs(M) / (s["Mu_pos"] if M >= 0 else s["Mu_neg"])
+        if ratio > worst[0]:
+            worst = (ratio, s["label"])
     if worst[1]:
         out.deck = {"ratio": worst[0], "label": worst[1]}
         if worst[0] > 1:

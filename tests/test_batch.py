@@ -22,6 +22,7 @@ def _data():
                           "S": {"seabed": -8.0, "kh": 20000, "tip": -24.0, "pu": 300}}
     d.pop("combinations")
     d.pop("lateral_flow")
+    d.pop("usability")                                   # 判定・許容荷重（U5）は test_usability で確認
     d["actions"]["EQ"]["directions"] = ["y"]
     d["level2"]["step"] = 0.02
     d["scenarios"] = {

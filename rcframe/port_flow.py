@@ -130,6 +130,8 @@ class FlowResult:
     ground: dict = field(default_factory=dict)        # 節点 -> 与えた地盤変位 [mm]（最終状態）
     final: object = None                              # Result（最終状態の部材端力・変位）
     caps: dict = field(default_factory=dict)          # ばね -> PileCapacity（level2.pile_hinge.model: fiber）
+    springs_used: dict = field(default_factory=dict)  # 節点 -> 解析に用いた地盤ばねの剛性（低減後、続けて載荷する用）
+    gravity: list = field(default_factory=list)       # 先に載せた長期荷重のケース
     warnings: list = field(default_factory=list)
 
     @property
@@ -231,10 +233,12 @@ def run_flow(pier, case, results=None, hinge_opt=None):
             if ug != 0:
                 ground.append((nid, d, ug))
     k_lin = {nid: m.node_springs[nid][d] for nid in m.node_springs}       # 低減後の剛性（線形のばね）
+    springs_used = {nid: k.copy() for nid, k in m.node_springs.items()}
     levels = [Level("上部工", None, pier.master(), 1.0)]                 # 「層間変形角」= 上部工の変位 [mm]
     inc = Incremental(m, hinges, levels, d, labels, mechanism_check=True, keep_states=True,
                       node_springs=ns, node_labels=nlabels, lateral_total=W)
-    out = FlowResult(case, inc, W, kinds=kinds, labels=labels, soil=ns, caps=caps, warnings=list(warns))
+    out = FlowResult(case, inc, W, kinds=kinds, labels=labels, soil=ns, caps=caps, warnings=list(warns),
+                     springs_used=springs_used, gravity=gcases)
     kh = abs(case.kh)
     try:
         inc.run("長期", cases=gcases, lam_target=1.0)

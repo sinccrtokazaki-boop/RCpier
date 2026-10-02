@@ -104,3 +104,17 @@ scenarios:
   refine:                           # 2段目（入力の分割・ファイバー）に回す条件
     when: {pile_yield: true, residual: [0.1, 2.0]}   # 杭の降伏、または上部工の残留変位 [m] がこの範囲
   workers: 4                        # 並列数
+# 被災後の利用可否の判定と許容荷重（利用可否 U5）。判定基準・必要な荷重は仮の値（ガイドライン・利用計画で要確認）
+usability:
+  required: {surcharge: 10, berthing: 500, tractive: 500}   # 利用に必要な荷重 [kN/m², kN, kN]
+  remove: [Ls]                      # 地震時の上載荷重は利用時の荷重に置き換える
+  limits:
+    residual_displacement: {limited: 0.1, unusable: 0.3}    # 上部工の残留水平変位 [m]
+    pile_rotation: {limited: 0.005, unusable: 0.02}         # 杭の残留の塑性回転角 [rad]
+    pile_damage: {塑性化: limited, 局部座屈: unusable}
+  allowable:
+    pile: plastic                   # plastic（塑性回転が増えない）/ buckling（局部座屈しない）/ none
+    deck_mu: true                   # 上部工の梁 |M| ≦ Mu
+    pile_axial: true                # 杭の軸力 ≦ Rcd, Rtd
+    fenders: [{x: 3.0, z: 1.0, friction: 0.0}]    # 接岸力の作用位置（省略時は actions.B の防舷材）
+    bollards: [{x: 3.0, angle_h: 0, angle_v: 0}]  # 牽引力の作用位置（省略時は actions.T の係船柱）
