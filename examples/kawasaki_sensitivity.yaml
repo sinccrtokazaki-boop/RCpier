@@ -30,17 +30,17 @@ sections:
       dt: 120
       end:    {top: 8-D22, bottom: 8-D25, stirrup: 4-D13@200}   # 断面積の等しい 1 種の径に換算（D22×5+D19×4、D25×5+D22×4）
       center: {top: 5-D22, bottom: 7-D22, stirrup: 4-D13@300}   # D22×5+D16×4 を換算
-  GX:                               # 法線平行方向の梁 G1〜G4（図52〜54）。配筋は判読が難しいため GY と同じとする
+  GX:                               # 法線平行方向の梁 G1〜G4（図52〜54、幅 1.00 m・せい 1.5 m）
     b: 1000
     D: 1500
     material: C24
     cover: 100
-    rebar:
-      main: SD295
+    rebar:                          # 径は図52 の符号（上端 B1・B11 D22、下端 B9・B10 D19）、本数は図から判読できないため
+      main: SD295                   # 幅 1.0 m の梁として常識的な本数（主筋間隔 150 程度）とした
       shear: SD295
       dt: 120
-      end:    {top: 8-D22, bottom: 8-D25, stirrup: 4-D13@200}
-      center: {top: 5-D22, bottom: 7-D22, stirrup: 4-D13@300}
+      end:    {top: 7-D22, bottom: 7-D19, stirrup: 4-D13@200}
+      center: {top: 5-D22, bottom: 7-D19, stirrup: 4-D13@300}
   P12:
     pipe: {D: 1000, t: 12}          # 図11: 陸側 3 列 φ1000 t12（STK50）
     material: STK50
@@ -117,11 +117,11 @@ scenarios:
   refine: {when: {pile_yield: true, residual: [0.1, 2.0]}}
   workers: 4
 
-usability:                          # 判定基準・必要な荷重は仮の値（これまでと同じ）
+usability:                          # 判定基準・必要な荷重は仮の値（残留変位の利用不可は渡版のかかり代から）
   required: {surcharge: 10, berthing: 500, tractive: 350}   # 牽引力は曲柱 35 t 型（図65）
   remove: [Ls]
   limits:
-    residual_displacement: {limited: 0.1, unusable: 0.3}
+    residual_displacement: {limited: 0.1, unusable: 0.2}    # 利用不可: 渡版のかかり代 約 200 mm（図64）を超える
     pile_rotation: {limited: 0.005, unusable: 0.02}
     pile_damage: {塑性化: limited, 局部座屈: unusable}
   allowable:
