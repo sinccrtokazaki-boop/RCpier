@@ -44,6 +44,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
 - `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
 - `rcframe/port_usability.py`: 利用可否の判定（judge）・許容荷重（allowable_loads）・超過確率（probability_summary）
+- `rcframe/port_cards.py`: 判定カードと一覧の HTML（write_cards、report.CSS と svg を使う）。`port_batch --cards フォルダ`
 - `rcframe/port_batch.py`: シナリオの一括実行（Batch、2段階、並列、JSON Lines で再開）。`python -m rcframe.port_batch 入力.yaml -j 4`
 - `rcframe/port_flow.py` : 側方流動のシナリオ（FlowCase、run_flow）。地盤変位は Incremental.run の ground（等価節点力 k·Δug）
 - `rcframe/pier_report.py`: 桟橋の計算書（章立て SECTIONS）。report.assemble_html・viewer_html を共通に使う。
@@ -80,7 +81,7 @@ P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P
 
 ## 利用可否シナリオのロードマップ（README.md 参照、直杭式横桟橋のみ、各段階はユーザー承認後に着手）
 U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位入力（側方流動）→ U3 済: ファイバー M–φ
-→ U4 済: 一括実行（2段階）→ U5 済: 判定・許容荷重・超過確率 → U6: 判定カード（HTML）
+→ U4 済: 一括実行（2段階）→ U5 済: 判定・許容荷重・超過確率 → U6 済: 判定カード（HTML）
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用

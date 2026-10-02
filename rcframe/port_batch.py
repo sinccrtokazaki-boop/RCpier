@@ -10,6 +10,7 @@
     逐次追記し、再実行時は計算済み（同じ id・段階）を飛ばす。CSV にも書き出す
 
 使い方: python -m rcframe.port_batch 入力.yaml -o 出力の名前（.jsonl と .csv）[-j 並列数]
+        [--cards フォルダ [--cards-all]]（判定カードと一覧 index.html、port_cards）
 単位: YAML は m（地盤変位・層厚・残留変位）、結果の表も m・rad
 """
 import argparse
@@ -203,9 +204,8 @@ def _summary(r, sid, tier, params, seconds):
     }
 
 
-def run_one(data, sid, params, tier, segments):
-    """1シナリオの計算。tier = "screen"（粗い分割・cos 式）/ "refine"（入力の分割・ファイバー）"""
-    t0 = time.time()
+def analyze(data, sid, params, tier, segments):
+    """1シナリオの解析。戻り値: (Pier, FlowResult)。tier = "screen"（粗い分割・cos 式）/ "refine"（入力の分割・ファイバー）"""
     ground = any(v != 0 for v in _surface_values(params))
     if tier == "screen":
         model = "soil_spring" if ground else "fixed_point"
@@ -218,7 +218,13 @@ def run_one(data, sid, params, tier, segments):
     case, ecu = to_flow_case(pier, params, sid)
     if tier == "refine":
         hinge["ecu"] = ecu
-    r = run_flow(pier, case, hinge_opt=hinge)
+    return pier, run_flow(pier, case, hinge_opt=hinge)
+
+
+def run_one(data, sid, params, tier, segments):
+    """1シナリオの計算と結果の行（usability があれば許容荷重と判定を含む）"""
+    t0 = time.time()
+    pier, r = analyze(data, sid, params, tier, segments)
     row = _summary(r, sid, tier, params, time.time() - t0)
     if pier.usability:                                   # 許容荷重と判定（U5）
         row.update(usability_row(pier, r, pier.usability))
@@ -355,6 +361,8 @@ def main(argv=None):
     ap.add_argument("input")
     ap.add_argument("-o", "--out", default=None, help="出力の名前（.jsonl と .csv）。既定は入力名_scenarios")
     ap.add_argument("-j", "--workers", type=int, default=None)
+    ap.add_argument("--cards", default=None, help="判定カードと一覧（index.html）を書き出すフォルダ")
+    ap.add_argument("--cards-all", action="store_true", help="全シナリオのカードを作る（既定は利用不可・制限付き利用）")
     a = ap.parse_args(argv)
     data = yaml.safe_load(Path(a.input).read_text(encoding="utf-8"))
     out = a.out or str(Path(a.input).with_suffix("")) + "_scenarios"
@@ -366,6 +374,11 @@ def main(argv=None):
     if b.pier.usability:
         from .port_usability import print_summary, probability_summary
         print_summary(probability_summary(rows, b.pier.usability), b.pier.usability)
+    if a.cards:
+        from .port_cards import write_cards
+        which = "all" if a.cards_all or not b.pier.usability else ("制限付き利用", "利用不可")
+        idx = write_cards(b, rows, a.cards, which, a.workers or b.cfg["workers"])
+        print(f"判定カード → {idx}")
 
 
 if __name__ == "__main__":
