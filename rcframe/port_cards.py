@@ -203,7 +203,7 @@ def card_html(pier, row, fr, opts, params):
     parts.append(f'<p class="note">全体で 局部座屈 {cnt["局部座屈"]} 箇所、塑性化 {cnt["塑性化"]} 箇所</p>')
     c = fr.case
     surf = ", ".join(f"{pier.gy[j][0]}: {v / M:.3f} m" for j, v in c.surface.items())  # 杭の列（Y通り）ごと
-    cond = [["方向", c.direction], ["海底面の地盤変位", surf], ["流動層の厚さ", f"{c.depth / M:g} m"],
+    cond = [["方向", c.direction], ["海底面の地盤変位", surf], ["流動層", c.layer_text],
             ["分布形", c.shape], ["地盤ばねの低減（剛性・上限）", f"{c.kh_factor:g}・{c.pu_factor:g}"],
             ["慣性力の換算震度", f"{c.kh:.3g}"], ["載荷順序", c.order], ["慣性力の除荷", "する" if c.unload else "しない"],
             ["局部座屈ひずみの式", str(params.get("ecu", "A"))]]
@@ -263,7 +263,7 @@ def summary_parts(rows, opts, h="h3"):
 def scenario_table(rows, cards=None, interactive=True):
     """シナリオの表（HTML）。cards: {id: カードのファイル名}（リンク）、interactive: 並べ替え・絞り込み"""
     cards = cards or {}
-    head = ["id", "判定", "地盤変位 [m]", "層厚 [m]", "kh", "εcu", "残留変位 [m]", "杭の降伏", "局部座屈",
+    head = ["id", "判定", "地盤変位 [m]", "層厚・下端 [m]", "kh", "εcu", "残留変位 [m]", "杭の降伏", "局部座屈",
             "上載 [kN/m²]", "接岸 [kN]", "牽引 [kN]", "段階"]
     trs = []
     for r in sorted_final(rows):
@@ -271,7 +271,8 @@ def scenario_table(rows, cards=None, interactive=True):
         link = f'<a href="{escape(cards[r["id"]])}">{escape(r["id"])}</a>' if r["id"] in cards else escape(r["id"])
         cells = [link, f'<span class="status {STATUS_CLS.get(st, "")}" style="font-size:12px">{escape(st)}</span>',
                  escape(_fmt(r["surface"]) if not isinstance(r["surface"], str) else r["surface"]),
-                 _fmt(r["depth"], "{:g}"), _fmt(r["kh"], "{:.3g}"), escape(str(r["ecu"])),
+                 _fmt(r["depth"], "{:g}") if r.get("bottom") is None else f"下端 {r['bottom']:+g}",
+                 _fmt(r["kh"], "{:.3g}"), escape(str(r["ecu"])),
                  _fmt(r["deck_residual"]), str(r["n_yield"]), _fmt(r.get("n_buckled"), "{}"),
                  _fmt(r.get("allow_surcharge"), "{:,.1f}"), _fmt(r.get("allow_berthing"), "{:,.0f}"),
                  _fmt(r.get("allow_tractive"), "{:,.0f}"), "詳細化" if r["tier"] == "refine" else "ふるい分け"]

@@ -37,7 +37,7 @@ from .port_usability import judge, usability_row
 
 M = 1e3
 PARAMS = FLOW_KEYS + ("ecu", "surface_ratio")       # シナリオの変数（grid・base に書ける）
-COLUMNS = ["id", "tier", "direction", "surface", "depth", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
+COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
            "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain",
            "soil_yield", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
@@ -192,7 +192,8 @@ def _summary(r, sid, tier, params, seconds):
     return {
         "id": sid, "tier": tier, "direction": c.direction,
         "surface": surf if not isinstance(surf, dict) else json.dumps(surf, ensure_ascii=False),
-        "depth": c.depth / M, "shape": c.shape, "kh_factor": c.kh_factor, "pu_factor": c.pu_factor,
+        "depth": c.depth / M if c.bottom is None else None, "bottom": None if c.bottom is None else c.bottom / M,
+        "shape": c.shape, "kh_factor": c.kh_factor, "pu_factor": c.pu_factor,
         "kh": c.kh, "order": c.order, "ecu": str(params.get("ecu", "A")),
         "reached": r.reached, "deck_peak": r.deck["peak"] / M, "deck_residual": r.deck["residual"] / M,
         "deck_rot": r.deck["rot_residual"], "head_rot_max": head[0], "head_rot_res": head_r[0],

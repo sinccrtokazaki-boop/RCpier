@@ -345,8 +345,9 @@ def pier_plan(pier, width=720):
     y0 = pier.gy[0][1] - pier.overhang["land"]
     y1 = pier.gy[-1][1] + pier.overhang["sea"]
     x0, x1 = pier.gx[0][1], pier.gx[-1][1]
-    V = View(x0, x1, y0, y1, width=width, margin=(40, 60, 40, 60), max_height=420)
-    a, b = V.p(x0, y1), V.p(x1, y0)
+    ox0, ox1 = x0 - pier.overhang.get("start", 0.0), x1 + pier.overhang.get("end", 0.0)
+    V = View(ox0, ox1, y0, y1, width=width, margin=(40, 60, 40, 60), max_height=420)
+    a, b = V.p(ox0, y1), V.p(ox1, y0)
     body = [f'<rect class="deck" x="{_f(a[0])}" y="{_f(a[1])}" width="{_f(b[0] - a[0])}" '
             f'height="{_f(b[1] - a[1])}"/>']
     for name, x in pier.gx:

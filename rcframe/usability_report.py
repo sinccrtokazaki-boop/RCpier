@@ -53,7 +53,7 @@ CHECKS = [
 ]
 COLUMN_DOC = {
     "id": "シナリオの id（変数の値から決まるハッシュ）", "tier": "screen（ふるい分け）/ refine（詳細化）",
-    "surface": "海底面の地盤変位 [m]（surface_ratio があれば海側の列の値）", "depth": "流動層の厚さ H [m]",
+    "surface": "海底面の地盤変位 [m]（surface_ratio があれば海側の列の値）", "depth": "流動層の厚さ H [m]", "bottom": "流動層の下端の標高 [m]",
     "kh": "慣性力の換算震度", "ecu": "局部座屈ひずみの式", "reached": "打ち切り変位に達せず全段階を載荷できた",
     "deck_peak": "上部工の最大変位 [m]", "deck_residual": "上部工の残留変位 [m]（流動方向を正）",
     "deck_rot": "上部工の平面の残留回転 [rad]", "head_rot_max": "杭頭の塑性回転角の最大 [rad]",
@@ -159,7 +159,8 @@ def sec_outline(pier, ctx):
     if worst:
         out.append(f'<p>上部工の残留変位の最大は {abs(worst["deck_residual"]):.3f} m（地盤変位 '
                    f'{_fmt(worst["surface"]) if not isinstance(worst["surface"], str) else worst["surface"]} m、'
-                   f'層厚 {worst["depth"]:g} m、kh = {worst["kh"]:.3g}）。</p>')
+                   + (f'層厚 {worst["depth"]:g} m' if worst.get("bottom") is None else f'流動層の下端 {worst["bottom"]:+g} m')
+                   + f'、kh = {worst["kh"]:.3g}）。</p>')
     out.append('<p class="note">判定基準・必要な荷重は入力値（計算例は仮の値）。結果は入力した地盤変位の分布形と大きさに'
                '強く依存する（8 章）。</p>')
     m = pier.model
@@ -337,7 +338,7 @@ def sec_representatives(pier, ctx):
                    f'シナリオ {escape(r["id"])}</h3>')
         c = fr.case
         out.append(f"<p>地盤変位 {', '.join(f'{p_.gy[j][0]} {v / M:.3f} m' for j, v in c.surface.items())}、"
-                   f"層厚 {c.depth / M:g} m、{c.shape}、kh = {c.kh:.3g}、εcu 式{escape(str(r['ecu']))}"
+                   f"{c.layer_text}、{c.shape}、kh = {c.kh:.3g}、εcu 式{escape(str(r['ecu']))}"
                    f"（{'詳細化' if r['tier'] == 'refine' else 'ふるい分け'}）。残留変位 {abs(r['deck_residual']):.3f} m。</p>")
         if r.get("reasons"):
             out.append("<ul class='list'>" + "".join(f"<li>{escape(x)}</li>" for x in r["reasons"].split(" / ")) + "</ul>")

@@ -6,6 +6,7 @@
               linear ug = ug0·(1 − ζ/H)
               uniform ug = ug0
               ζ > H では 0（H: 流動する層の厚さ）。ug0 は杭の列ごとに与えられる
+              H は depth（海底面からの厚さ、全列共通）または bottom（流動層の下端の標高、列ごとに H = 海底面 − bottom）
     流動層  : ζ < H の地盤ばねの剛性・上限に低減係数（kh_factor, pu_factor）を掛けられる（液状化の影響）
     慣性力  : 上部工の重心に kh·W（port_level2.inertia_pattern）
     載荷順序: simultaneous（同時に比例増加）/ ground_first（地盤変位 → 慣性力）/ inertia_first（慣性力 → 地盤変位）
@@ -28,7 +29,7 @@ from .results import Result
 M = 1e3           # m → mm
 SHAPES = ("cos", "linear", "uniform")
 ORDERS = ("simultaneous", "ground_first", "inertia_first")
-KEYS = ("direction", "surface", "depth", "shape", "kh_factor", "pu_factor", "kh", "order", "unload",
+KEYS = ("direction", "surface", "depth", "bottom", "shape", "kh_factor", "pu_factor", "kh", "order", "unload",
         "step", "max_displacement")
 
 
@@ -60,6 +61,15 @@ class FlowCase:
     unload: bool = True
     step: float = None                              # 1ステップの上部工の変位増分の上限 [mm]（None: level2.step）
     max_displacement: float = None                  # 打ち切る上部工の変位 [mm]（None: level2.max_displacement）
+    bottom: float = None                            # 流動層の下端の標高 [mm]（与えれば depth の代わりに列ごとの H）
+
+    def layer(self, seabed):
+        """杭の列の流動層の厚さ H [mm]（海底面の標高 seabed [mm]）"""
+        return self.depth if self.bottom is None else max(seabed - self.bottom, 0.0)
+
+    @property
+    def layer_text(self):
+        return f"層厚 {self.depth / M:g} m" if self.bottom is None else f"流動層の下端 {self.bottom / M:+g} m"
 
 
 def read_flow_cases(pier, data):
@@ -76,9 +86,10 @@ def read_flow_cases(pier, data):
         direction = str(d.get("direction", "+y"))
         if direction.lstrip("+-").lower() not in ("x", "y"):
             raise InputError(f"{what}.direction: +x, -x, +y, -y から指定してください: {direction!r}")
-        for k in ("surface", "depth"):
-            if k not in d:
-                raise InputError(f"{what}: {k} がありません")
+        if "surface" not in d:
+            raise InputError(f"{what}: surface がありません")
+        if ("depth" in d) == ("bottom" in d):
+            raise InputError(f"{what}: depth（層厚）と bottom（下端の標高）のどちらか一方を指定してください")
         rows = sorted({j for (_, j) in pier.pile_sec})
         s = d["surface"]
         if isinstance(s, dict):
@@ -90,9 +101,10 @@ def read_flow_cases(pier, data):
             surface = {j: surface.get(j, 0.0) for j in rows}
         else:
             surface = {j: _num(s, f"{what}.surface") * M for j in rows}
-        depth = _num(d["depth"], f"{what}.depth") * M
-        if depth <= 0:
+        depth = _num(d["depth"], f"{what}.depth") * M if "depth" in d else 0.0
+        if "depth" in d and depth <= 0:
             raise InputError(f"{what}.depth: 正の値です")
+        bottom = _num(d["bottom"], f"{what}.bottom") * M if "bottom" in d else None
         shape = str(d.get("shape", "cos"))
         if shape not in SHAPES:
             raise InputError(f"{what}.shape: {', '.join(SHAPES)} のいずれかです")
@@ -109,7 +121,7 @@ def read_flow_cases(pier, data):
             _num(d.get("kh", 0.0), f"{what}.kh"), order, bool(d.get("unload", True)),
             _num(d["step"], f"{what}.step") * M if d.get("step") is not None else None,
             _num(d["max_displacement"], f"{what}.max_displacement") * M
-            if d.get("max_displacement") is not None else None))
+            if d.get("max_displacement") is not None else None, bottom))
     return out
 
 
@@ -165,7 +177,7 @@ class FlowResult:
 
     def print(self):
         c = self.case
-        print(f"\n■ 側方流動 {c.name}  方向 {c.direction}、分布 {c.shape}、層厚 {c.depth / M:g} m、"
+        print(f"\n■ 側方流動 {c.name}  方向 {c.direction}、分布 {c.shape}、{c.layer_text}、"
               f"慣性力 kh = {c.kh:g}（{c.order}）")
         print("  海底面の地盤変位: " + ", ".join(f"{v / M:g} m" for v in c.surface.values()))
         if not self.reached:
@@ -221,15 +233,16 @@ def run_flow(pier, case, results=None, hinge_opt=None):
     for (i, j), p in pier.piles.items():
         tag = f"{pier.gx[i][0]}/{pier.gy[j][0]}"
         ug0 = case.surface.get(j, 0.0)
+        H = case.layer(p["seabed"])
         for nid, z, k, cap in p["ground"]:
             zeta = p["seabed"] - z
-            if zeta < case.depth * (1 - 1e-9):                    # 流動層の地盤ばねの低減
+            inside = zeta < H * (1 - 1e-9)
+            if inside:                                            # 流動層の地盤ばねの低減
                 m.node_springs[nid][:2] = saved[nid][:2] * case.kh_factor
             if cap:
-                ns[(nid, d)] = EPSpring(m.node_springs[nid][d], cap * (case.pu_factor if zeta < case.depth *
-                                                                       (1 - 1e-9) else 1.0))
+                ns[(nid, d)] = EPSpring(m.node_springs[nid][d], cap * (case.pu_factor if inside else 1.0))
                 nlabels[(nid, d)] = f"地盤 {tag} z={z / M:.2f}"
-            ug = sign * ground_profile(case.shape, ug0, case.depth, zeta)
+            ug = sign * ground_profile(case.shape, ug0, H, zeta) if H > 0 else 0.0
             if ug != 0:
                 ground.append((nid, d, ug))
     k_lin = {nid: m.node_springs[nid][d] for nid in m.node_springs}       # 低減後の剛性（線形のばね）

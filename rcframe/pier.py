@@ -158,8 +158,8 @@ class Pier(GridMixin):
         if self.slab_t < 0 or self.slab_t > self.deck_top - self.z_soffit:
             raise InputError("deck.slab_thickness: 0 以上、上部工の厚さ（top − soffit）以下としてください")
         oh = d.get("overhang") or {}
-        _check_keys(oh, ("sea", "land"), "deck.overhang")
-        self.overhang = {k: _num(oh.get(k, 0.0), f"deck.overhang.{k}") * M for k in ("sea", "land")}
+        _check_keys(oh, ("sea", "land", "start", "end"), "deck.overhang")
+        self.overhang = {k: _num(oh.get(k, 0.0), f"deck.overhang.{k}") * M for k in ("sea", "land", "start", "end")}
         if min(self.overhang.values()) < 0:
             raise InputError("deck.overhang: 0 以上としてください")
 
@@ -204,12 +204,24 @@ class Pier(GridMixin):
             name = str(name)
             if name not in self.iy:
                 raise InputError(f"{what}: 未定義の Y通り（杭の列）です")
-            _check_keys(d, ("seabed", "kh", "Rcd", "Rtd", "tip", "pu"), what)
+            _check_keys(d, ("seabed", "kh", "Rcd", "Rtd", "tip", "pu", "layers"), what)
+            layers = []                               # 海底面から下へ [(下端 z [mm], kh [N/mm³], pu [N/mm²] or None)]
+            for k, ly in enumerate(d.get("layers") or []):
+                lw = f"{what}.layers[{k}]"
+                _check_keys(ly, ("bottom", "kh", "pu"), lw)
+                if "bottom" not in ly or "kh" not in ly:
+                    raise InputError(f"{lw}: bottom と kh を指定してください")
+                layers.append((_num(ly["bottom"], lw) * M, _num(ly["kh"], lw) * KH,
+                               _num(ly["pu"], lw) * KN_M2 if ly.get("pu") is not None else None))
+                if layers[-1][1] <= 0 or (k and layers[-1][0] >= layers[-2][0]):
+                    raise InputError(f"{lw}: kh は正、bottom は上の層より深くしてください")
+            if layers and "kh" not in d:
+                d = {**d, "kh": layers[0][1] / KH}       # β（仮想固定点・ヒンジの剛性）は最上層の kh
             self.pile_soil[self.iy[name]] = {
                 "tip": _num(d["tip"], f"{what}.tip") * M if "tip" in d else None,
-                "pu": _num(d["pu"], f"{what}.pu") * KN_M2 if "pu" in d else None}
+                "pu": _num(d["pu"], f"{what}.pu") * KN_M2 if "pu" in d else None, "layers": layers}
             if "seabed" not in d or "kh" not in d:
-                raise InputError(f"{what}: seabed と kh を指定してください")
+                raise InputError(f"{what}: seabed と kh（または layers）を指定してください")
             if "Rcd" in d or "Rtd" in d:              # 設計支持力（押込み・引抜き）[kN]（入力値）
                 self.pile_capacity[self.iy[name]] = tuple(
                     _num(d[k], f"{what}.{k}") * KN if k in d else None for k in ("Rcd", "Rtd"))
@@ -281,8 +293,13 @@ class Pier(GridMixin):
                 for k in range(n_seg + 1):
                     z = seabed - k * dz
                     lt = dz / 2 if k in (0, n_seg) else dz           # 負担長
-                    kk = kh * sec.D * lt
-                    cap = soil["pu"] * sec.D * lt if soil.get("pu") else None
+                    kz, pz = kh, soil.get("pu")
+                    for bot, lk, lp in soil.get("layers", []):      # 層別（その層の下端より上にある最初の層）
+                        kz, pz = lk, lp
+                        if z > bot + 1e-6:
+                            break
+                    kk = kz * sec.D * lt
+                    cap = pz * sec.D * lt if pz else None
                     m.add_node(nid, x, y, z, fix=[0, 0, 1, 0, 0, 1] if k == n_seg else None)
                     m.add_node_spring(nid, [kk, kk, 0, 0, 0, 0])
                     self.labels[("node", nid)] = f"{tag} z={z / M:.2f}"
@@ -362,6 +379,17 @@ class Pier(GridMixin):
                                      f"{self.gx[i][0]}-{self.gx[i + 1][0]} がありません")
                 m.add_member_load(case, self.elem_ids[("x", j, i)], [0, 0, -q * o])
             ws.add(q * o * (xb - xa), (xa + xb) / 2, self.gy[j][1] + sgn * o / 2)
+        ya, yb = self.gy[0][1], self.gy[-1][1]
+        for side, i, sgn in (("start", 0, -1), ("end", nx - 1, 1)):     # 法線方向の両端の張出し
+            o = self.overhang[side]
+            if o <= 0:
+                continue
+            for j in range(ny - 1):
+                if ("y", i, j) not in self.elem_ids:
+                    raise InputError(f"張出し（{side}）: {self.gx[i][0]} 通りの梁 "
+                                     f"{self.gy[j][0]}-{self.gy[j + 1][0]} がありません")
+                m.add_member_load(case, self.elem_ids[("y", i, j)], [0, 0, -q * o])
+            ws.add(q * o * (yb - ya), self.gx[i][1] + sgn * o / 2, (ya + yb) / 2)
 
     def _sea_beam_nodes(self, x, what):
         """海側の梁上の位置 x を含む梁の両端節点 (nid0, nid1, 座標0, 座標1)"""

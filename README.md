@@ -575,6 +575,23 @@ python -m rcframe.port_batch examples/pier_level2.yaml -o 結果 -j 4 --report �
 （テストの一覧）、留意事項と照合が必要な事項、付録（CSV の列の定義・入力データ）。
 計算済みの .jsonl があれば解析は代表シナリオだけ。結果の CSV を Excel で開いたままでも別名で書き出して続行する
 
+**層別の地盤ばね・両端の張出し・流動層の下端（川崎港の検討で追加）**
+```yaml
+deck:
+  overhang: {sea: 1.40, land: 1.10, start: 2.20, end: 2.20}   # start / end: 法線方向の両端（X の小・大）
+piles:
+  rows:
+    L: {seabed: -4.8, tip: -41.0, layers: [{bottom: -13.0, kh: 29000, pu: 300},   # 海底面から下へ層ごと
+                                           {bottom: -38.0, kh: 15000, pu: 300},
+                                           {bottom: -60.0, kh: 44000, pu: 1200}]}
+lateral_flow / scenarios:
+  bottom: -18.0                     # 流動層の下端の標高 [m]（depth の代わり。列ごとに H = 海底面 − bottom）
+```
+- layers: 節点のばね k = kh(その節点の層)·D·負担長、上限 pu(層)·D·負担長。kh を省略すると最上層の kh で β を求める
+- 両端の張出しは、端の法線直角方向の梁への線荷重と重量に入る（隅角部は無視）
+- 計算例: `examples/kawasaki_higashiogishima.yaml`（川崎港 東扇島 −12m 岸壁 桟橋部の 1 ブロック、図面集から作成、
+  地盤・材料・荷重・判定基準は仮定）
+
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。
 式A と式B の値の差は基準の原文で確認中（fiber.VERIFY_ITEMS）。既定は式A

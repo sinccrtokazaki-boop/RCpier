@@ -39,7 +39,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
   照合が必要な事項は VERIFY_ITEMS
 - 配筋の読み込みは building.parse_rebar（建物・桟橋で共通）
 - `rcframe/port_level2.py`: レベル2プッシュオーバー（杭の Mp(N) ヒンジ、地盤ばね EPSpring、要求点と判定）
-- 地盤ばね: Model.add_node_spring（対角ばね）、Result.spring_forces。pushover の node_springs で非線形化
+- 地盤ばね: Model.add_node_spring（対角ばね）、Result.spring_forces。pushover の node_springs で非線形化。piles.rows.*.layers で層別の kh・pu
 - Element.prepare は形状（_geom_key）と断面・ばね（_prep_key）を分けてキャッシュし、変わった部分だけ再計算する
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
 - `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
@@ -97,7 +97,7 @@ U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位�
 - 照合が必要（桟橋）: 示方書の Ec の表（steel.JSCE_EC_TABLE）、鋼管のせん断形状係数 2、
   port_check.VERIFY_ITEMS、port_level2.VERIFY_ITEMS
 - 桟橋のレベル2: 杭の軸力は長期で固定、載荷方向の曲げ面のみ、上部工の梁は弾性（M ≦ Mu を確認）
-- 側方流動: 地盤変位は列ごとに海底面からの深さの関数（流動方向の 1成分）、低減係数は ζ < H の節点のばねに一律、
+- 側方流動: 地盤変位は列ごとに海底面からの深さの関数（流動方向の 1成分、H は depth または bottom）、低減係数は ζ < H の節点のばねに一律、
   分布・低減係数・載荷順序は入力（FLIP・基準で要確認）
 - ファイバーのヒンジ: My〜Mu を直線（θu = (φu − φy)·Lp）、局部座屈後の耐力低下なし、軸力は長期で固定（0.5%Ny 刻み）
 - 照合が必要（U3）: fiber.VERIFY_ITEMS（εcu の式A・式B）
