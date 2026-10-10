@@ -19,7 +19,7 @@ from .port_batch import COLUMNS, analyze
 from .port_cards import CARD_CSS, INDEX_JS, STATUS_CLS, allowable_bars, damage_frame, damage_levels, \
     scenario_table, sorted_final, summary_parts
 from .port_level2 import VERIFY_ITEMS as L2_VERIFY, pile_capacity, pipe_mp
-from .port_usability import LOAD_NAME, STATUS, VERIFY_ITEMS as USE_VERIFY, final_rows, load_text
+from .port_usability import LOAD_NAME, STATUS, VERIFY_ITEMS as USE_VERIFY, final_rows, load_text, required_values
 from .report import Raw, assemble_html, figure, table
 from .results import Result
 
@@ -75,6 +75,8 @@ COLUMN_DOC = {
     "deck_mu_res": "残留状態の上部工の梁の M/Mu の最大",
     "pile_axial_max": "本震の履歴中の杭の軸力 / 設計支持力（Rcd・Rtd）の最大（支持力の入力があるとき）",
     "pile_m_res": "杭のヒンジの残留モーメント / My の最大",
+    "methods_ok": "使える利用方法（usability.methods があるとき）",
+    "allow_aftershock": "余震の許容震度 kh（本震後に慣性力を両向きに漸増、G2）",
     "allow_surcharge": "許容上載荷重 [kN/m²]", "allow_berthing": "許容接岸力 [kN]", "allow_tractive": "許容牽引力 [kN]",
     "status": "判定", "reasons": "判定の理由", "refine_reason": "2段目に回した理由", "seconds": "計算時間 [s]",
 }
@@ -295,14 +297,34 @@ def sec_criteria(pier, ctx):
     for k, name in (("deck_mu", "本震時の上部工の梁の M/Mu"), ("pile_axial", "本震時の杭の軸力 / 設計支持力")):
         if k in lim:
             rows.append([name, "1 以上" if lim[k] == "limited" else "-", "1 以上" if lim[k] == "unusable" else "-"])
-    rows.append(["許容荷重", "必要な荷重を下回る", "0（載せられない）"])
-    out = [table(["項目", "制限付き利用", "利用不可"], rows),
-           table(["荷重", "必要な値"], [[LOAD_NAME[k], load_text(k, v)] for k, v in opts["required"].items()]),
+    for k, name in (("wall_move", "土留部の残留水平変位"), ("bridge_opening", "渡版の開き"),
+                    ("bridge_closing", "土留部が上部工に寄る"), ("apron_step", "土留部の背後の段差")):
+        if k in lim:
+            lo, hi = lim[k]
+            rows.append([name] + [f"{v / M:g} m 以上" if v != math.inf else "-" for v in (lo, hi)])
+    if "aftershock" in opts["required"]:
+        rows.append(["余震（L1 相当）の許容震度", *[f"{load_text('aftershock', opts['required']['aftershock'])} 未満"
+                                                if lim.get("aftershock") == lv else "-" for lv in ("limited", "unusable")]])
+    ms = opts.get("methods") or {}
+    if ms:
+        out = [table(["項目", f"{STATUS[1]}（フェーズ 2・3 は不可）", f"{STATUS[2]}（全ての利用方法が不可）"], rows),
+               '<p class="note">施設の利用の観点の項目（渡版・段差）は、注意事項あり の欄の値で緊急復旧（渡版の仮設・段差の解消）'
+               "を前提とした注意事項になる。利用方法ごとに、利用時の荷重が許容荷重以下かを確かめる。</p>",
+               table(["利用方法", "フェーズ", "内容"] + [LOAD_NAME[k] for k in ("surcharge", "berthing", "tractive")],
+                     [[n, str(m["phase"]), m["label"] or "-"]
+                      + [load_text(k, m["loads"][k]) if k in m["loads"] else "-" for k in ("surcharge", "berthing", "tractive")]
+                      for n, m in ms.items()])]
+    else:
+        rows.append(["許容荷重", "必要な荷重を下回る", "0（載せられない）"])
+        out = [table(["項目", STATUS[1], STATUS[2]], rows),
+               table(["荷重", "必要な値"], [[LOAD_NAME[k], load_text(k, v)] for k, v in required_values(opts).items()])]
+    out += [
            table(["許容荷重の限界", "設定"], [["杭", {"plastic": "塑性回転が増えない", "buckling": "局部座屈しない",
                                                    "none": "考慮しない"}[opts["pile"]]],
                                          ["上部工の梁", "|M| ≦ Mu" if opts["deck_mu"] else "考慮しない"],
                                          ["杭の軸力", "≦ Rcd・Rtd" if opts["pile_axial"] else "考慮しない"],
-                                         ["取り除く地震時の荷重", ", ".join(opts["remove"]) or "なし"]]),
+                                         ["取り除く地震時の荷重", ", ".join(opts["remove"]) or "なし"]])]
+    out += [
            '<p class="note">判定基準・必要な荷重は入力値。計算例は仮の値で、ガイドライン・利用計画で定めること。</p>']
     return "".join(out)
 

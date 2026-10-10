@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .report import CSS, Raw, figure, table
 from .svg import View, circle, line, poly, svg, text, xy_chart
-from .port_usability import LOAD_NAME, STATUS, final_rows, load_text, probability_summary
+from .port_usability import LOAD_NAME, STATUS, final_rows, load_text, probability_summary, required_values
 
 M = 1e3
 STATUS_CLS = {STATUS[0]: "st0", STATUS[1]: "st1", STATUS[2]: "st2"}
@@ -146,7 +146,8 @@ def damage_frame(pier, fr, levels, width=720):
 
 def allowable_bars(row, opts, width=720):
     """許容荷重 / 必要な荷重 の棒グラフ（1 = 必要な荷重、2 倍以上は 2 で頭打ち）"""
-    items = [(k, row.get(f"allow_{k}"), req) for k, req in opts["required"].items() if row.get(f"allow_{k}") is not None]
+    items = [(k, row.get(f"allow_{k}"), req) for k, req in required_values(opts).items()
+             if row.get(f"allow_{k}") is not None]
     if not items:
         return None
     ml, mr, h = 120, 230, 30
@@ -202,7 +203,7 @@ def card_html(pier, row, fr, opts, params):
             parts.append(table(["荷重", "許容値", "必要な値", "決めた限界"],
                                [[LOAD_NAME[k], load_text(k, row[f"allow_{k}"], ",.1f"), load_text(k, req),
                                  row.get(f"allow_{k}_by", "")]
-                                for k, req in opts["required"].items() if row.get(f"allow_{k}") is not None]))
+                                for k, req in required_values(opts).items() if row.get(f"allow_{k}") is not None]))
     fig, name, scale = damage_frame(pier, fr, levels)
     parts.append("<h3>杭の損傷と残留変形</h3>")
     parts.append(figure(fig, f"{name} 通りの断面。灰: 元の形、赤線: 残留変形（{scale:.0f} 倍）、茶の破線: 地盤変位、"
@@ -236,14 +237,20 @@ def summary_parts(rows, opts, h="h3"):
                    [[Raw(f'<span class="status {STATUS_CLS[k]}" style="font-size:13px">{k}</span>'),
                      sum(r.get("status") == k for r in fr), f"{p:.1%}", f"{se:.1%}"]
                     for k, (p, se) in s["status"].items()], num=(1, 2, 3))]
+    if s["methods"]:
+        ms = opts["methods"]
+        parts.append(table(["利用方法", "フェーズ", "内容", "使える割合", "標準誤差"],
+                           [[k, str(ms[k]["phase"]), ms[k]["label"] or "-", f"{p:.1%}", f"{se:.1%}"]
+                            for k, (p, se) in s["methods"].items()], num=(3, 4)))
     if s["allow"]:
-        parts.append(table(["荷重", "必要な値", "許容値が不足する割合", "標準誤差"],
-                           [[LOAD_NAME[k], load_text(k, opts["required"][k]), f"{p:.1%}", f"{se:.1%}"]
+        req = required_values(opts)
+        parts.append(table(["荷重", "比べる値", "許容値が不足する割合", "標準誤差"],
+                           [[LOAD_NAME[k], load_text(k, req[k]), f"{p:.1%}", f"{se:.1%}"]
                             for k, (p, se) in s["allow"].items()], num=(2, 3)))
     series, notes, fits = [], [], []
     xs = [float(r["surface"]) for r in fr if not isinstance(r["surface"], str)]
     xmax = max(xs + [0.1]) * 1.2
-    for lab, cls in (("制限付き利用以上", "c1"), ("利用不可", "c4")):
+    for lab, cls in (("注意事項あり以上", "c1"), ("利用不可", "c4")):
         f = s["fragility"][lab]
         if f is None:
             notes.append(f"{lab}: 推定できません（全て同じ判定）")
@@ -310,14 +317,12 @@ def index_html(name, rows, opts, cards):
 # ============================================================ 書き出し
 def card_one(data, sid, params, tier, segments, row):
     """シナリオを解析し直してカードの HTML を返す（子プロセスでも動く）。戻り値: (HTML, 解析し直した行)"""
-    from .port_batch import _summary, analyze, usability_eval, usability_opts
-    from .port_usability import judge
+    from .port_batch import _summary, analyze, judge_columns, usability_eval, usability_opts
     pier, fr = analyze(data, sid, params, tier, segments)
     again = _summary(pier, fr, sid, tier, params, 0.0)
     if pier.usability:
         again.update(usability_eval(pier, fr, params))
-        again["status"], rs = judge(again, usability_opts(pier, params))
-        again["reasons"] = " / ".join(rs)
+        again.update(judge_columns(again, usability_opts(pier, params)))
     return card_html(pier, {**row, **again}, fr, pier.usability, params), again
 
 

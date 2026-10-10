@@ -105,7 +105,7 @@ def test_judge_deck_and_axial():
     st, why = judge({**base, "deck_mu_max": 1.02}, _opts())
     assert st == STATUS[2] and "上部工の梁が Mu" in why[0] and "1.02" in why[0]
     assert judge({**base, "deck_mu_max": 1.02}, _opts(deck_mu="ok"))[0] == STATUS[0]
-    st, why = judge({**base, "pile_axial_max": 1.1}, _opts())                # 既定は制限付き（フェーズ 1 は特性値）
+    st, why = judge({**base, "pile_axial_max": 1.1}, _opts())                # 既定は注意事項あり（フェーズ 1 は特性値）
     assert st == STATUS[1] and "設計支持力" in why[0]
     assert judge({**base, "pile_axial_max": None, "deck_mu_max": None}, _opts())[0] == STATUS[0]
 
@@ -118,8 +118,8 @@ def test_judge_pile_head_buckling():
     assert o["limits"]["pile_damage"] == {"塑性化": "limited", "局部座屈": "unusable", "杭頭の局部座屈": "limited"}
     st, why = judge(row, o)                                                   # 地中部の 1 箇所で利用不可
     assert st == STATUS[2] and "利用不可: 杭の局部座屈（地中部）1 箇所" in why
-    assert "制限付き利用: 杭の局部座屈（杭頭）2 箇所" in why
-    assert judge({**row, "n_buckled": 2}, o)[0] == STATUS[1]                  # 杭頭だけなら制限付き
+    assert f"{STATUS[1]}: 杭の局部座屈（杭頭）2 箇所" in why
+    assert judge({**row, "n_buckled": 2}, o)[0] == STATUS[1]                  # 杭頭だけなら注意事項あり
     st, why = judge({**row, "n_buckled_head": None}, o)                       # 位置が不明なら全て地中部の扱い
     assert st == STATUS[2] and "杭の局部座屈 3 箇所" in why[0]
     # 局部座屈だけを指定すると杭頭も同じ設定

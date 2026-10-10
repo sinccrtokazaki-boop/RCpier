@@ -116,7 +116,7 @@ def test_index_counts_and_links(batch, tmp_path):
 
 
 def test_write_cards_filter(batch, tmp_path):
-    """既定は 制限付き利用・利用不可 のシナリオだけカードを作る"""
+    """既定は 利用可（注意事項あり）・利用不可 のシナリオだけカードを作る"""
     b, rows = batch
     write_cards(b, rows, tmp_path, (STATUS[1], STATUS[2]), workers=1, log=lambda *a: None)
     n = sum(r["status"] != STATUS[0] for r in final_rows(rows))

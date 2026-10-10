@@ -44,7 +44,7 @@ from .grid import InputError, _check_keys, _num
 from . import port_deterioration as det_model
 from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
 from .port_level2 import deck_sections
-from .port_usability import RETAIN_KEYS, judge, read_retaining, retaining_row, usability_row
+from .port_usability import METHOD_SEP, RETAIN_KEYS, STATUS, judge_detail, read_retaining, retaining_row, usability_row
 
 M = 1e3
 DET_KEYS = ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil",
@@ -56,7 +56,7 @@ COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh
            "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_buckled_head", "n_plastic", "max_strain",
            "perforation", "deck_mu_max", "deck_mu_res", "pile_axial_max", "pile_m_res",
            "soil_yield", "wall_move", "bridge_rel", "apron_step", "allow_surcharge", "allow_berthing", "allow_tractive", "allow_aftershock",
-           "status", "reasons", "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "allow_aftershock_by", "refine_reason", "seconds", "det"]
+           "status", "methods_ok", "reasons", "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "allow_aftershock_by", "refine_reason", "seconds", "det"]
 DISTS = ("lognormal", "normal", "uniform", "choice")
 
 
@@ -344,6 +344,12 @@ def usability_opts(pier, params):
     return {**pier.usability, "rebar_loss": det["rebar_loss"]}
 
 
+def judge_columns(row, opts):
+    """判定の列 {status, reasons, methods_ok}（methods_ok は使える利用方法を「・」でつないだもの、利用方法がなければ None）"""
+    st, reasons, ok = judge_detail(row, opts)
+    return {"status": st, "reasons": " / ".join(reasons), "methods_ok": None if ok is None else METHOD_SEP.join(ok)}
+
+
 def usability_eval(pier, r, params):
     """許容荷重・土留部と渡版の値・判定を結果の行の列にする（pier.usability がなければ {}）"""
     if not pier.usability:
@@ -359,10 +365,9 @@ def run_one(data, sid, params, tier, segments):
     t0 = time.time()
     pier, r = analyze(data, sid, params, tier, segments)
     row = _summary(pier, r, sid, tier, params, time.time() - t0)
-    if pier.usability:                                   # 許容荷重と判定（U5）、土留部と渡版（D3）
+    if pier.usability:                                   # 許容荷重と判定（U5）、土留部と渡版（D3）、利用方法（G3）
         row.update(usability_eval(pier, r, params))
-        row["status"], reasons = judge(row, usability_opts(pier, params))
-        row["reasons"] = " / ".join(reasons)
+        row.update(judge_columns(row, usability_opts(pier, params)))
         row["seconds"] = round(time.time() - t0, 2)
     return row
 
@@ -506,7 +511,7 @@ def main(argv=None):
     ap.add_argument("-o", "--out", default=None, help="出力の名前（.jsonl と .csv）。既定は入力名_scenarios")
     ap.add_argument("-j", "--workers", type=int, default=None)
     ap.add_argument("--cards", default=None, help="判定カードと一覧（index.html）を書き出すフォルダ")
-    ap.add_argument("--cards-all", action="store_true", help="全シナリオのカードを作る（既定は利用不可・制限付き利用）")
+    ap.add_argument("--cards-all", action="store_true", help="全シナリオのカードを作る（既定は利用不可・利用可（注意事項あり））")
     ap.add_argument("--report", default=None, help="検討報告書（HTML）の出力先")
     a = ap.parse_args(argv)
     data = yaml.safe_load(Path(a.input).read_text(encoding="utf-8"))
@@ -521,7 +526,7 @@ def main(argv=None):
         print_summary(probability_summary(rows, b.pier.usability), b.pier.usability)
     if a.cards:
         from .port_cards import write_cards
-        which = "all" if a.cards_all or not b.pier.usability else ("制限付き利用", "利用不可")
+        which = "all" if a.cards_all or not b.pier.usability else (STATUS[1], STATUS[2])
         idx = write_cards(b, rows, a.cards, which, a.workers or b.cfg["workers"])
         print(f"判定カード → {idx}")
     if a.report:

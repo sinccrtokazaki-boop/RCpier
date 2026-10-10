@@ -5,7 +5,7 @@ import pytest
 
 from rcframe import InputError, Pier
 from rcframe.port_batch import Batch
-from rcframe.port_usability import judge, read_retaining, read_usability
+from rcframe.port_usability import STATUS, judge, read_retaining, read_usability
 
 from test_deterioration import _data
 
@@ -19,11 +19,11 @@ def _opts():
 
 @pytest.mark.parametrize("row, status, word", [
     ({"bridge_rel": 0.05, "apron_step": 0.0}, "利用可", None),
-    ({"bridge_rel": 0.10, "apron_step": 0.0}, "制限付き利用", "渡版の開き 0.100"),
+    ({"bridge_rel": 0.10, "apron_step": 0.0}, STATUS[1], "渡版の開き 0.100"),
     ({"bridge_rel": 0.25, "apron_step": 0.0}, "利用不可", "渡版の開き"),
     ({"bridge_rel": -0.25, "apron_step": 0.0}, "利用可", None),             # 寄る方向は bridge_closing で判定
-    ({"bridge_rel": -0.35, "apron_step": 0.0}, "制限付き利用", "土留部が上部工に寄る 0.350"),
-    ({"bridge_rel": 0.0, "apron_step": 0.06}, "制限付き利用", "段差 0.060"),
+    ({"bridge_rel": -0.35, "apron_step": 0.0}, STATUS[1], "土留部が上部工に寄る 0.350"),
+    ({"bridge_rel": 0.0, "apron_step": 0.06}, STATUS[1], "段差 0.060"),
     ({"bridge_rel": 0.0, "apron_step": 0.20}, "利用不可", "段差"),
 ])
 def test_judge_boundaries(row, status, word):

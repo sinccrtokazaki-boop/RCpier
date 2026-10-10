@@ -107,7 +107,7 @@ def make_input(name):
 
 
 def summarize(rows):
-    """供用年数ごとの判定の確率と、判定を決めた理由（利用不可・制限付き利用の理由の種類の出現数）"""
+    """供用年数ごとの判定の確率と、判定を決めた理由（利用不可・利用可（注意事項あり）の理由の種類の出現数）"""
     out = {}
     for age in sorted({r["age"] for r in rows}):
         g = [r for r in final_rows(rows) if r["age"] == age]

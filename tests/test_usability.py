@@ -150,12 +150,12 @@ def test_judge_boundaries():
             "allow_surcharge": 50, "allow_berthing": 1000, "allow_tractive": 1000}
     assert judge(base, opts) == ("利用可", [])
     assert judge({**base, "deck_residual": 0.0999}, opts)[0] == "利用可"
-    assert judge({**base, "deck_residual": 0.1}, opts)[0] == "制限付き利用"
+    assert judge({**base, "deck_residual": 0.1}, opts)[0] == STATUS[1]
     assert judge({**base, "deck_residual": -0.5}, opts)[0] == "利用不可"
-    assert judge({**base, "inground_rot_res": 0.005}, opts)[0] == "制限付き利用"
-    assert judge({**base, "n_yield": 2}, opts)[0] == "制限付き利用"                 # 1段目: 降伏 = 塑性化
+    assert judge({**base, "inground_rot_res": 0.005}, opts)[0] == STATUS[1]
+    assert judge({**base, "n_yield": 2}, opts)[0] == STATUS[1]                 # 1段目: 降伏 = 塑性化
     assert judge({**base, "n_buckled": 1, "n_plastic": 0}, opts)[0] == "利用不可"
-    assert judge({**base, "allow_berthing": 299.9}, opts)[0] == "制限付き利用"
+    assert judge({**base, "allow_berthing": 299.9}, opts)[0] == STATUS[1]
     assert judge({**base, "allow_surcharge": 0.0}, opts)[0] == "利用不可"
     s, why = judge({**base, "deck_residual": 0.2, "n_buckled": 3, "n_plastic": 1}, opts)
     assert s == "利用不可" and len(why) == 3
@@ -217,10 +217,10 @@ def test_probability_summary_synthetic():
                      "allow_berthing": 100.0 if k >= 8 else 1000.0})
     s = probability_summary(rows, {**opts, "required": {"berthing": 300}})
     assert s["n"] == 10 and len(final_rows(rows)) == 10
-    assert s["status"]["制限付き利用"][0] == pytest.approx(0.3)
+    assert s["status"][STATUS[1]][0] == pytest.approx(0.3)
     assert s["status"]["利用不可"] == pytest.approx((0.1, math.sqrt(0.1 * 0.9 / 10)))
     assert s["allow"]["berthing"][0] == pytest.approx(0.2)
-    th, b = s["fragility"]["制限付き利用以上"]
+    th, b = s["fragility"]["注意事項あり以上"]
     assert 0.6 < th < 0.7                                        # 0.6 と 0.7 の間で切り替わる（完全分離）
 
 

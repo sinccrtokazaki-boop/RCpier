@@ -23,7 +23,8 @@ import yaml
 from . import pier_chain, svg
 from .chain_draw import code_str, full_svg
 from .port_cards import CARD_CSS, STATUS_CLS
-from .port_usability import LOAD_NAME, RETAIN_LIMITS, STATUS, final_rows, fit_fragility, judge, load_text, read_usability
+from .port_usability import (LOAD_NAME, RETAIN_LIMITS, STATUS, final_rows, fit_fragility, judge, load_text, read_usability,
+                             required_values)
 from .report import Raw, assemble_html, figure, table
 
 BLOCK_SCENARIO = {"chloride": "S1", "chloride_top": "S1", "pile": "S2", "scour": "S4"}
@@ -217,13 +218,13 @@ def _cover(study, ctx):
 
 
 def _key_numbers(ctx):
-    """概要の数値（常時の全部・地震後の各ケースの、最後と最初の年数の利用不可・制限付き以上の確率）"""
+    """概要の数値（常時の全部・地震後の各ケースの、最後と最初の年数の利用不可・注意事項あり以上の確率）"""
     out = []
     for c in ctx["normal"]:
         if len(c["scenarios"]) > 1 or c is ctx["normal"][-1]:
             a = c["ages"][-1]
             p = probs(at(c["rows"], a))
-            out.append((f"{p[STATUS[1]][0] + p[STATUS[2]][0]:.0%}", f"{c['label']}（{a:g} 年）の制限付き利用以上"))
+            out.append((f"{p[STATUS[1]][0] + p[STATUS[2]][0]:.0%}", f"{c['label']}（{a:g} 年）の注意事項あり以上"))
             break
     for c in ctx["eq"]:
         p0, p1 = probs(at(c["rows"], c["ages"][0])), probs(at(c["rows"], c["ages"][-1]))
@@ -262,7 +263,7 @@ def sec_outline(study, ctx):
         worst = max(ctx["normal"], key=lambda c: 1 - probs(at(c["rows"], c["ages"][-1]))[STATUS[0]][0])
         p = probs(at(worst["rows"], worst["ages"][-1]))
         li.append(f"常時: 最も厳しいのは {worst['label']} の {worst['ages'][-1]:g} 年で、利用可 {p[STATUS[0]][0]:.1%}・"
-                  f"制限付き利用 {p[STATUS[1]][0]:.1%}・利用不可 {p[STATUS[2]][0]:.1%}。")
+                  f"注意事項あり {p[STATUS[1]][0]:.1%}・利用不可 {p[STATUS[2]][0]:.1%}。")
     for c in ctx["eq"]:
         worse, other, stats = _driver(c)
         p0, p1 = probs(at(c["rows"], c["ages"][0])), probs(at(c["rows"], c["ages"][-1]))
@@ -422,9 +423,9 @@ def sec_method(study, ctx):
             trs.append([cc["level"], "杭の残留の塑性回転角", f"{lim['pile_rotation'][0]:g} rad 以上", f"{lim['pile_rotation'][1]:g} rad 以上"])
         trs.append([cc["level"], "杭の損傷", "塑性化", "局部座屈"])
         trs.append([cc["level"], "許容荷重（必要な値: " + "、".join(
-            f"{LOAD_NAME[k]} {load_text(k, v)}" for k, v in cc["opts"]["required"].items()) + "）",
+            f"{LOAD_NAME[k]} {load_text(k, v)}" for k, v in required_values(cc["opts"]).items()) + "）",
             "必要な値を下回る", "0（載せられない）"])
-    out.append(table(["", "項目", "制限付き利用", "利用不可"], trs))
+    out.append(table(["", "項目", "注意事項あり", "利用不可"], trs))
     out.append('<p class="note">いずれも仮の値。許容荷重は、被災状態（常時は長期荷重の状態）から単位荷重を増やし、杭の塑性回転の'
                '増加・梁の |M| = Mu に最初に達する荷重係数。</p>')
     return "".join(out)
@@ -444,11 +445,11 @@ def sec_normal(study, ctx):
                 rs.update(reason_counts(g, lv))
             trs.append([c["label"], f"{a:g}"] + [f"{p[s][0]:.1%}" for s in STATUS]
                        + ["、".join(f"{k} {v}" for k, v in rs.most_common(4)) or "-"])
-    out.append(table(["ケース", "年数"] + list(STATUS) + ["制限付き利用以上の理由（件数、重複あり）"], trs, num=(1, 2, 3, 4)))
+    out.append(table(["ケース", "年数"] + list(STATUS) + ["注意事項あり以上の理由（件数、重複あり）"], trs, num=(1, 2, 3, 4)))
     out.append("<h3>許容荷重</h3>")
     trs = []
     for c in ctx["normal"]:
-        req = c["opts"]["required"]
+        req = required_values(c["opts"])
         for a in c["ages"]:
             g = at(c["rows"], a)
             row = [c["label"], f"{a:g}"]
@@ -556,7 +557,7 @@ def sec_eq(study, ctx):
             fmt = lambda f: "推定できない" if f is None or f[1] < 0.02 or f[1] > 5 else f"θ = {f[0]:.3f} m、β = {f[1]:.2f}"
             fr.append([f"{a:g}", fmt(f1), fmt(f2)])
         out.append(f"<details><summary>{escape(c['level'])}: フラジリティ曲線 P = Φ(ln(x/θ)/β) の最尤推定</summary>"
-                   + table(["年数", "制限付き利用以上", "利用不可"], fr)
+                   + table(["年数", "注意事項あり以上", "利用不可"], fr)
                    + '<p class="note">劣化した状態では、地盤変位が小さくても杭頭の局部座屈などで利用不可になる抽出があり、'
                      '対数正規のフラジリティ曲線にはよく当てはまらない（β が大きくなる）。判定がほぼ全て同じ場合は推定できない。</p></details>')
     # 杭頭の腐食量と局部座屈（最初の地震のケースの最後の年数）
@@ -616,9 +617,9 @@ def sec_discussion(study, ctx):
         g = at(c["rows"], a)
         p = probs(g)
         perf = sum(bool(r.get("perforation")) for r in g)
-        req = c["opts"]["required"]
+        req = required_values(c["opts"])
         pb = np.mean([r["allow_berthing"] < req["berthing"] for r in g if _num(r.get("allow_berthing"))])
-        s = (f"<h3>{escape(nm['S2'])}</h3><p>常時の {a:g} 年で、利用可 {_pct(p[STATUS[0]][0])}・制限付き利用 "
+        s = (f"<h3>{escape(nm['S2'])}</h3><p>常時の {a:g} 年で、利用可 {_pct(p[STATUS[0]][0])}・注意事項あり "
              f"{_pct(p[STATUS[1]][0])}・利用不可 {_pct(p[STATUS[2]][0])}。許容接岸力が必要な値を下回る確率は {_pct(pb)}、"
              f"腐食量が板厚に達した杭（開孔）のある抽出は {perf} 件。")
         if ctx["eq"]:
@@ -641,7 +642,7 @@ def sec_discussion(study, ctx):
         p = probs(g)
         f2 = safe_fit([float(r["surface"]) for r in g], [r["status"] == STATUS[2] for r in g])
         s = (f"<h3>{escape(nm['S3'])}（{escape(e['level'])}、劣化なし）</h3><p>{a0:g} 年（劣化なし）の利用不可 {_pct(p[STATUS[2]][0])}、"
-             f"制限付き利用 {_pct(p[STATUS[1]][0])}。")
+             f"注意事項あり {_pct(p[STATUS[1]][0])}。")
         if f2 and 0.02 < f2[1] < 5:
             s += f"利用不可のフラジリティ曲線は中央値 {f2[0]:.3f} m（β {f2[1]:.2f}）。"
         rs = reason_counts(g, STATUS[2])
@@ -686,7 +687,7 @@ def sec_discussion(study, ctx):
             n_open = sum(any("渡版の開き" in x for x in (r.get("reasons") or "").split(" / ")) for r in g)
             trs.append([f"{a:g}", _pct(1 - p[STATUS[0]][0]), _pct(1 - nr[STATUS[0]] / len(g)), n_step, n_open])
         out.append(f"<h3>{escape(nm['S5'])}（{escape(e['level'])}）</h3>")
-        out.append(table(["年数", "制限付き利用以上", "同（土留部の基準を除く）", "段差が理由", "渡版の開きが理由"], trs,
+        out.append(table(["年数", "注意事項あり以上", "同（土留部の基準を除く）", "段差が理由", "渡版の開きが理由"], trs,
                          num=(1, 2, 3, 4)))
     out.append('<p class="note">土留部の移動・沈下は地盤変位に比を掛けた仮定で、土留部の構造形式（点検 (4)）に応じた検討が必要。</p>')
     return "".join(out)

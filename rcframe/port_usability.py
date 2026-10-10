@@ -15,7 +15,8 @@
         必要な値 required.aftershock は余震として想定する L1 地震動の照査用震度。余震による地盤変位の増加・
         液状化は扱わない（静的な扱い。ガイドライン 3.5 で静的解析による検討が可能な場合があるとされる）
 判定（usability.limits）: 上部工の残留変位、杭の残留の塑性回転角、杭の損傷の程度、許容荷重と必要な荷重
-    から「利用可 / 制限付き利用 / 利用不可」を決め、最も厳しいものをとる
+    から「利用可 / 利用可（注意事項あり）/ 利用不可」を決め、最も厳しいものをとる（区分は能登半島地震の際の公表と同じ）
+    利用方法（usability.methods、ガイドライン 表 D-1・表 D-5、G3）があれば利用方法ごとに判定する（judge_detail）
     本震時の条件（港湾施設の利用可否判断に係るガイドライン 第2版 表 D-5、G1）:
         deck_mu    : 本震の履歴中に上部工の梁が Mu（設計断面耐力）に達した → 既定 unusable
         pile_axial : 本震の履歴中に杭の軸力が設計支持力に達した → 既定 limited（フェーズ 1 は特性値以下でよいため）
@@ -25,7 +26,7 @@
     土留部の海側への移動 δw = wall_ratio × 土留部の列（usability.retaining.row、既定は海底面の最も高い列）の
     海底面の地盤変位。背後の沈下 s = settlement、または settlement_ratio × δw
     渡版の開き Δ = 上部工の残留変位 − δw（正: 開く、負: 土留部が上部工に寄る）→ limits.bridge_opening / bridge_closing
-    段差 = s（杭で支える上部工は沈下しないとする）→ limits.apron_step
+    段差 = s（杭で支える上部工は沈下しないとする）→ limits.apron_step。土留部の移動 → limits.wall_move
 超過確率: 一括実行（port_batch、scenarios.distributions で変数を確率分布から抽出）の結果の行から、
     判定ごとの確率、許容荷重が必要な荷重を下回る確率（標準誤差つき）、地盤変位に対する
     フラジリティ曲線 P = Φ(ln(x/θ)/β)（最尤法）
@@ -48,9 +49,12 @@ LOADS = ("surcharge", "berthing", "tractive", "aftershock")
 LOAD_NAME = {"surcharge": "上載荷重", "berthing": "接岸力", "tractive": "牽引力", "aftershock": "余震の震度"}
 LOAD_UNIT = {"surcharge": "kN/m²", "berthing": "kN", "tractive": "kN", "aftershock": ""}
 MAX_DEFAULT = {"surcharge": 200.0, "berthing": 20000.0, "tractive": 20000.0, "aftershock": 1.0}
-STATUS = ("利用可", "制限付き利用", "利用不可")
+STATUS = ("利用可", "利用可（注意事項あり）", "利用不可")
+OLD_STATUS = {"制限付き利用": STATUS[1]}                                  # G3 より前の結果の判定の名前
+METHOD_SEP = "・"                                                         # 使える利用方法の区切り
+PHASES = (1, 2, 3)                                                        # 利用フェーズ（ガイドライン 表 3-1）
 LEVELS = ("ok", "limited", "unusable")                                    # 判定の項目ごとの設定 → STATUS の番号
-RETAIN_LIMITS = ("bridge_opening", "bridge_closing", "apron_step")     # 土留部と渡版の閾値 [m]
+RETAIN_LIMITS = ("bridge_opening", "bridge_closing", "apron_step", "wall_move")   # 土留部と渡版の閾値 [m]
 RETAIN_KEYS = ("wall_ratio", "settlement", "settlement_ratio")           # シナリオの変数
 VERIFY_ITEMS = [
     "利用可否の判定基準（残留変位・杭の塑性回転角・損傷の程度の閾値）。計算例の値は仮の値",
@@ -69,7 +73,7 @@ def load_text(kind, v, digits=None):
 
 # ============================================================ 入力
 def _levels(d, what):
-    """{limited: 値, unusable: 値} → (制限付きの下限, 利用不可の下限)"""
+    """{limited: 値, unusable: 値} → (注意事項ありの下限, 利用不可の下限)"""
     _check_keys(d, ("limited", "unusable"), what)
     lo = _num(d["limited"], f"{what}.limited") if "limited" in d else math.inf
     hi = _num(d["unusable"], f"{what}.unusable") if "unusable" in d else math.inf
@@ -82,7 +86,7 @@ def read_usability(pier, d):
     """YAML の usability を読む（なければ None）"""
     if not d:
         return None
-    _check_keys(d, ("limits", "required", "allowable", "remove", "retaining"), "usability")
+    _check_keys(d, ("limits", "required", "allowable", "remove", "retaining", "methods"), "usability")
     lim = d.get("limits") or {}
     _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage", "deck_mu", "pile_axial", "aftershock")
                 + RETAIN_LIMITS, "usability.limits")
@@ -110,6 +114,23 @@ def read_usability(pier, d):
     req = d.get("required") or {}
     _check_keys(req, LOADS, "usability.required")
     required = {k: _num(v, f"usability.required.{k}") for k, v in req.items()}
+    methods = {}
+    for name, m in (d.get("methods") or {}).items():                 # 利用方法（表 D-1・表 D-5、G3）
+        what = f"usability.methods.{name}"
+        name = str(name)
+        if not isinstance(m, dict) or "phase" not in m:
+            raise InputError(f"{what}: phase（利用フェーズ 1〜3）を指定してください")
+        _check_keys(m, ("phase", "label", "surcharge", "berthing", "tractive"), what)
+        if m["phase"] not in PHASES or METHOD_SEP in name:
+            raise InputError(f"{what}: phase は 1・2・3、名前に「{METHOD_SEP}」は使えません")
+        mloads = {k: _num(m[k], f"{what}.{k}") for k in LOADS if k in m}
+        if any(v < 0 for v in mloads.values()):
+            raise InputError(f"{what}: 荷重は 0 以上です")
+        methods[name] = dict(phase=m["phase"], label=str(m.get("label", "")), loads=mloads)
+    if methods and any(k != "aftershock" for k in required):
+        raise InputError("usability: methods を使うときは、利用時の荷重を methods に書いてください"
+                         "（required は aftershock だけ）")
+    need = set(required) | {k for m in methods.values() for k in m["loads"]}
     al = d.get("allowable") or {}
     _check_keys(al, ("pile", "deck_mu", "pile_axial", "max", "fenders", "bollards", "loads"), "usability.allowable")
     pile = str(al.get("pile", "plastic"))
@@ -118,10 +139,12 @@ def read_usability(pier, d):
     mx = dict(MAX_DEFAULT)
     _check_keys(al.get("max") or {}, LOADS, "usability.allowable.max")
     mx.update({k: _num(v, f"usability.allowable.max.{k}") for k, v in (al.get("max") or {}).items()})
-    loads = [str(x) for x in al.get("loads", list(required) or list(LOADS))]
+    loads = [str(x) for x in al.get("loads", [k for k in LOADS if k in need] or list(LOADS))]
     for x in loads:
         if x not in LOADS:
             raise InputError(f"usability.allowable.loads: {', '.join(LOADS)} から選んでください: {x!r}")
+    if methods and need - set(loads):
+        raise InputError(f"usability.allowable.loads: 判定に使う荷重 {', '.join(sorted(need - set(loads)))} がありません")
     fenders = []
     for f in al.get("fenders") or []:
         what = f"usability.allowable.fenders {f}"
@@ -146,7 +169,7 @@ def read_usability(pier, d):
         wall_row = str(ret["row"])
         if pier is not None and (wall_row not in pier.iy or pier.iy[wall_row] not in pier.pile_rows):
             raise InputError(f"usability.retaining.row: 杭の列ではありません: {wall_row!r}")
-    return dict(limits=limits, required=required, pile=pile, deck_mu=bool(al.get("deck_mu", True)),
+    return dict(limits=limits, required=required, methods=methods, pile=pile, deck_mu=bool(al.get("deck_mu", True)),
                 pile_axial=bool(al.get("pile_axial", True)), max=mx, loads=loads,
                 fenders=fenders, bollards=bollards, remove=remove, wall_row=wall_row)
 
@@ -318,70 +341,131 @@ def allowable_loads(pier, fr, opts):
 
 
 # ============================================================ 判定
-def judge(row, opts):
-    """結果の行（port_batch の列、または usability_row の戻り値）の判定。戻り値: (判定, [理由])"""
-    lv, reasons = 0, []
-
-    def up(level, why):
-        nonlocal lv
-        if level > 0:
-            reasons.append(f"{STATUS[level]}: {why}")
-        lv = max(lv, level)
+def _checks(row, opts):
+    """荷重の不足以外の判定の項目 [(段階 0/1/2, 理由, 種類)]（段階は limits の ok / limited / unusable）。
+    種類: "struct"（構造の安定の観点）または ("use", 緊急復旧の内容)（施設の利用の観点: 渡版・土留部の背後の段差）"""
+    out = []
     lim = opts["limits"]
+    code = {k: i for i, k in enumerate(LEVELS)}
+
+    def add(level, why, kind="struct"):
+        if level > 0:
+            out.append((level, why, kind))
+
+    def by_length(key, v, why, kind="struct"):
+        lo, hi = lim[key]
+        add(2 if v * M >= hi else 1 if v * M >= lo else 0, why, kind)
     if "residual_displacement" in lim:
-        lo, hi = lim["residual_displacement"]
-        v = abs(row["deck_residual"]) * M
-        up(2 if v >= hi else 1 if v >= lo else 0, f"上部工の残留変位 {v / M:.3f} m")
+        by_length("residual_displacement", abs(row["deck_residual"]), f"上部工の残留変位 {abs(row['deck_residual']):.3f} m")
     if "pile_rotation" in lim:
         lo, hi = lim["pile_rotation"]
         v = max(row.get("head_rot_res") or 0.0, row.get("inground_rot_res") or 0.0)
-        up(2 if v >= hi else 1 if v >= lo else 0, f"杭の残留の塑性回転角 {v:.4f} rad")
-    code = {k: i for i, k in enumerate(LEVELS)}
+        add(2 if v >= hi else 1 if v >= lo else 0, f"杭の残留の塑性回転角 {v:.4f} rad")
     pd = lim["pile_damage"]
     if row.get("n_buckled"):
         nh = row.get("n_buckled_head")
         if nh is None or pd["杭頭の局部座屈"] == pd["局部座屈"]:
             where = "" if nh is None else f"（杭頭 {nh}、地中部 {row['n_buckled'] - nh}）"
-            up(code[pd["局部座屈"]], f"杭の局部座屈 {row['n_buckled']} 箇所{where}")
+            add(code[pd["局部座屈"]], f"杭の局部座屈 {row['n_buckled']} 箇所{where}")
         else:
             if row["n_buckled"] - nh:
-                up(code[pd["局部座屈"]], f"杭の局部座屈（地中部）{row['n_buckled'] - nh} 箇所")
+                add(code[pd["局部座屈"]], f"杭の局部座屈（地中部）{row['n_buckled'] - nh} 箇所")
             if nh:
-                up(code[pd["杭頭の局部座屈"]], f"杭の局部座屈（杭頭）{nh} 箇所")
+                add(code[pd["杭頭の局部座屈"]], f"杭の局部座屈（杭頭）{nh} 箇所")
     n_pl = row.get("n_plastic") if row.get("n_plastic") is not None else row.get("n_yield", 0)
     if n_pl:
-        up(code[pd["塑性化"]], f"杭の塑性化 {n_pl} 箇所")
+        add(code[pd["塑性化"]], f"杭の塑性化 {n_pl} 箇所")
     if (row.get("deck_mu_max") or 0) >= 1 and "deck_mu" in lim:
-        up(code[lim["deck_mu"]], f"本震時に上部工の梁が Mu に達した（M/Mu = {row['deck_mu_max']:.2f}）")
+        add(code[lim["deck_mu"]], f"本震時に上部工の梁が Mu に達した（M/Mu = {row['deck_mu_max']:.2f}）")
     if (row.get("pile_axial_max") or 0) >= 1 and "pile_axial" in lim:
-        up(code[lim["pile_axial"]], f"本震時に杭の軸力が設計支持力に達した（N/Rd = {row['pile_axial_max']:.2f}）")
+        add(code[lim["pile_axial"]], f"本震時に杭の軸力が設計支持力に達した（N/Rd = {row['pile_axial_max']:.2f}）")
+    if row.get("wall_move") is not None and "wall_move" in lim:
+        by_length("wall_move", row["wall_move"], f"土留部の残留水平変位 {row['wall_move']:.3f} m")
     rel = row.get("bridge_rel")
     if rel is not None:
         if "bridge_opening" in lim and rel > 0:
-            lo, hi = lim["bridge_opening"]
-            v = rel * M
-            up(2 if v >= hi else 1 if v >= lo else 0, f"渡版の開き {rel:.3f} m（上部工 − 土留部）")
+            by_length("bridge_opening", rel, f"渡版の開き {rel:.3f} m（上部工 − 土留部）", ("use", "渡版の仮設"))
         if "bridge_closing" in lim and rel < 0:
-            lo, hi = lim["bridge_closing"]
-            v = -rel * M
-            up(2 if v >= hi else 1 if v >= lo else 0, f"土留部が上部工に寄る {-rel:.3f} m")
+            by_length("bridge_closing", -rel, f"土留部が上部工に寄る {-rel:.3f} m", ("use", "渡版の補修"))
     if row.get("apron_step") is not None and "apron_step" in lim:
-        lo, hi = lim["apron_step"]
-        v = row["apron_step"] * M
-        up(2 if v >= hi else 1 if v >= lo else 0, f"土留部の背後の段差 {row['apron_step']:.3f} m")
+        by_length("apron_step", row["apron_step"], f"土留部の背後の段差 {row['apron_step']:.3f} m", ("use", "段差の解消"))
+    a, req = row.get("allow_aftershock"), opts["required"].get("aftershock")
+    if a is not None and req is not None and a < req:               # 余震時の条件（表 D-5）
+        add(code[lim.get("aftershock", "unusable")],
+            f"余震（L1 相当）に対する余裕の不足: 許容 {load_text('aftershock', a)} < 想定 {load_text('aftershock', req)}")
+    return out
+
+
+def judge(row, opts):
+    """結果の行（port_batch の列、または usability_row の戻り値）の判定。戻り値: (判定, [理由])"""
+    return judge_detail(row, opts)[:2]
+
+
+def judge_detail(row, opts):
+    """判定・理由と、使える利用方法（usability.methods があるとき、なければ None）。戻り値: (判定, [理由], [利用方法])
+    利用方法がなければ、項目ごとの段階の最も厳しいもの（理由は「段階: 内容」）。
+    利用方法があれば（ガイドライン 表 D-5、G3）、項目の段階を limited = フェーズ 2・3 は不可、unusable = 全て不可と読み、
+    施設の利用の観点の項目（渡版・段差）の limited は緊急復旧を前提とした注意事項とする。さらに利用方法ごとに
+    利用時の荷重（上載荷重・接岸力・牽引力）≦ 許容値を確かめる。判定は、全ての利用方法が使えて注意事項がなければ
+    利用可、一部が使える（または注意事項がある）なら利用可（注意事項あり）、どれも使えなければ利用不可"""
+    if opts.get("methods"):
+        return _judge_methods(row, opts)
+    lv, reasons = 0, []
+    for level, why, _ in _checks(row, opts):
+        reasons.append(f"{STATUS[level]}: {why}")
+        lv = max(lv, level)
     for k, req in opts["required"].items():
         a = row.get(f"allow_{k}")
-        if a is None:
+        if a is None or k == "aftershock":
             continue
-        if k == "aftershock":                    # 余震時の条件（表 D-5）: 既定は不足すれば利用不可
-            if a < req:
-                up(code[lim.get("aftershock", "unusable")],
-                   f"余震（L1 相当）に対する余裕の不足: 許容 {load_text(k, a)} < 想定 {load_text(k, req)}")
-        elif a <= 0:
-            up(2, f"{LOAD_NAME[k]}を載せられない")
-        elif a < req:
-            up(1, f"{LOAD_NAME[k]}の許容値 {a:g} {LOAD_UNIT[k]} < 必要な値 {req:g}")
-    return STATUS[lv], reasons
+        level = 2 if a <= 0 else 1 if a < req else 0
+        if level:
+            reasons.append(f"{STATUS[level]}: " + (f"{LOAD_NAME[k]}を載せられない" if level == 2 else
+                                                   f"{LOAD_NAME[k]}の許容値 {a:g} {LOAD_UNIT[k]} < 必要な値 {req:g}"))
+            lv = max(lv, level)
+    return STATUS[lv], reasons, None
+
+
+def _judge_methods(row, opts):
+    meths = opts["methods"]
+    fails = {n: [] for n in meths}
+    notes = []
+    items = _checks(row, opts)
+    if row.get("n_buckled") is None and (row.get("n_yield") or 0) > 0:   # ふるい分けだけで降伏: 限界曲率は不明
+        items.append((2, "杭が降伏し、限界曲率の超過は未確認（詳細化していない）", "struct"))
+    for level, why, kind in items:
+        if kind != "struct" and level == 1:
+            notes.append(f"注意事項: {why}（緊急復旧: {kind[1]}）")
+            continue
+        for n, m in meths.items():
+            if level == 2 or m["phase"] >= 2:
+                fails[n].append(why)
+    for n, m in meths.items():
+        for k, v in m["loads"].items():
+            a = row.get(f"allow_{k}")
+            if a is None:
+                fails[n].append(f"{LOAD_NAME[k]}の許容値がない")
+            elif a < v:
+                fails[n].append(f"{LOAD_NAME[k]}の許容値 {load_text(k, a)} < {load_text(k, v)}")
+    ok = [n for n in meths if not fails[n]]
+    status = STATUS[2] if not ok else STATUS[0] if len(ok) == len(meths) and not notes else STATUS[1]
+    reasons = [f"使える利用方法: {METHOD_SEP.join(ok) if ok else 'なし'}"]
+    by = {}
+    for n in meths:
+        for w in fails[n]:
+            by.setdefault(w, []).append(n)
+    for w, ns in by.items():
+        reasons.append(f"{'全ての利用方法' if len(ns) == len(meths) else METHOD_SEP.join(ns) + ' '}で不可: {w}")
+    return status, reasons + notes, ok
+
+
+def required_values(opts):
+    """許容荷重と比べる値 {種類: 値}: required と、利用方法ごとの値の最大（判定カードの棒グラフ・集計用）"""
+    out = dict(opts["required"])
+    for m in (opts.get("methods") or {}).values():
+        for k, v in m["loads"].items():
+            out[k] = max(out.get(k, v), v)
+    return out
 
 
 def read_retaining(params):
@@ -418,9 +502,11 @@ def usability_row(pier, fr, opts):
 
 # ============================================================ 超過確率
 def final_rows(rows):
-    """シナリオごとに 2段目があれば 2段目、なければ 1段目の行"""
+    """シナリオごとに 2段目があれば 2段目、なければ 1段目の行（G3 より前の判定の名前は今の名前に読み替える）"""
     by = {}
     for r in rows:
+        if r.get("status") in OLD_STATUS:
+            r = {**r, "status": OLD_STATUS[r["status"]]}
         if r["id"] not in by or r["tier"] == "refine":
             by[r["id"]] = r
     return list(by.values())
@@ -458,8 +544,11 @@ def print_summary(s, opts):
     print(f"\n■ 利用可否の集計（{s['n']} シナリオ）")
     for k, (p, se) in s["status"].items():
         print(f"  {k:<8} {p:6.1%}（標準誤差 {se:.1%}）")
+    for k, (p, se) in s["methods"].items():
+        print(f"  利用方法 {k} が使える {p:6.1%}（標準誤差 {se:.1%}）")
+    req = required_values(opts)
     for k, (p, se) in s["allow"].items():
-        print(f"  {LOAD_NAME[k]}の許容値 < 必要な値 {load_text(k, opts['required'][k])}: {p:6.1%}（標準誤差 {se:.1%}）")
+        print(f"  {LOAD_NAME[k]}の許容値 < {load_text(k, req[k])}: {p:6.1%}（標準誤差 {se:.1%}）")
     for k, f in s["fragility"].items():
         print(f"  フラジリティ（{k}）: " + ("推定できません（全て同じ判定）" if f is None else
                                           f"中央値 {f[0]:.3f} m、対数標準偏差 {f[1]:.3f}"))
@@ -467,17 +556,20 @@ def print_summary(s, opts):
 
 def probability_summary(rows, opts, x_key="surface"):
     """結果の行（usability の列つき）から確率の集計。戻り値: dict
-        n、status: {判定: (確率, 標準誤差)}、allow: {荷重: (P(許容 < 必要), 標準誤差)}、
-        fragility: {"制限付き利用以上" / "利用不可": (θ, β) or None}（x_key の値に対して）"""
+        n、status: {判定: (確率, 標準誤差)}、methods: {利用方法: (使える確率, 標準誤差)}、
+        allow: {荷重: (P(許容 < 比べる値), 標準誤差)}（比べる値は required_values）、
+        fragility: {"注意事項あり以上" / "利用不可": (θ, β) or None}（x_key の値に対して）"""
     fr = final_rows(rows)
-    out = {"n": len(fr), "status": {}, "allow": {}, "fragility": {}}
+    out = {"n": len(fr), "status": {}, "methods": {}, "allow": {}, "fragility": {}}
     st = [r["status"] for r in fr]
     for s in STATUS:
         out["status"][s] = _prob([x == s for x in st])
-    for k, req in opts["required"].items():
+    for n in opts.get("methods") or {}:
+        out["methods"][n] = _prob([n in (r.get("methods_ok") or "").split(METHOD_SEP) for r in fr])
+    for k, req in required_values(opts).items():
         vals = [r.get(f"allow_{k}") for r in fr if r.get(f"allow_{k}") is not None]
         out["allow"][k] = _prob([v < req for v in vals])
     xs = [float(r[x_key]) if not isinstance(r[x_key], str) else math.nan for r in fr]
-    out["fragility"]["制限付き利用以上"] = fit_fragility(xs, [s != STATUS[0] for s in st])
+    out["fragility"]["注意事項あり以上"] = fit_fragility(xs, [s != STATUS[0] for s in st])
     out["fragility"]["利用不可"] = fit_fragility(xs, [s == STATUS[2] for s in st])
     return out
