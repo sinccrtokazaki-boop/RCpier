@@ -1,0 +1,375 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1410 1252" width="1410" height="1252" font-family="Meiryo, 'Yu Gothic', 'Hiragino Sans', sans-serif" role="img" aria-label="RC 桟橋の変状連鎖図" id="chain">
+<defs>
+<marker id="ah-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7d878c"/></marker>
+<marker id="ah-t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c0582e"/></marker>
+<marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#a8327a"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<rect x="0" y="62.0" width="1410" height="342.5" fill="#f4f6f3"/>
+<line x1="0" x2="1410" y1="62.0" y2="62.0" stroke="#cfd4cf" stroke-width="1"/>
+<text x="12" y="224.2" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">上部工</text>
+<text x="12" y="242.2" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">（RC 床版・梁）</text>
+<rect x="0" y="404.5" width="1410" height="252.0" fill="#ffffff"/>
+<line x1="0" x2="1410" y1="404.5" y2="404.5" stroke="#cfd4cf" stroke-width="1"/>
+<text x="12" y="521.5" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">鋼管杭・</text>
+<text x="12" y="539.5" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">防食工</text>
+<rect x="0" y="656.5" width="1410" height="265.0" fill="#f4f6f3"/>
+<line x1="0" x2="1410" y1="656.5" y2="656.5" stroke="#cfd4cf" stroke-width="1"/>
+<text x="12" y="771.0" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">地盤・</text>
+<text x="12" y="789.0" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">捨石斜面・</text>
+<text x="12" y="807.0" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">土留部</text>
+<rect x="0" y="921.5" width="1410" height="232.5" fill="#ffffff"/>
+<line x1="0" x2="1410" y1="921.5" y2="921.5" stroke="#cfd4cf" stroke-width="1"/>
+<text x="12" y="1019.8" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">付属物・</text>
+<text x="12" y="1037.8" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">接続部</text>
+<text x="12" y="1055.8" font-size="13.5" font-weight="700" dominant-baseline="middle" fill="#1e2528">（防舷材・渡版）</text>
+<text x="204.0" y="26.0" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">要因</text>
+<text x="204.0" y="45" text-anchor="middle" font-size="10.5" fill="#5d676c">作用・環境・設計施工・地盤</text>
+<path d="M298.0,22 l30,0" stroke-width="1.4" stroke="#5d676c" marker-end="url(#ah-p)"/>
+<text x="422.0" y="26.0" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">初期の変状</text>
+<path d="M516.0,22 l30,0" stroke-width="1.4" stroke="#5d676c" marker-end="url(#ah-p)"/>
+<text x="640.0" y="26.0" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">損傷の進展</text>
+<path d="M734.0,22 l30,0" stroke-width="1.4" stroke="#5d676c" marker-end="url(#ah-p)"/>
+<text x="858.0" y="26.0" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">性能の低下</text>
+<path d="M952.0,22 l30,0" stroke-width="1.4" stroke="#5d676c" marker-end="url(#ah-p)"/>
+<text x="1076.0" y="26.0" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">部材・構造の破壊</text>
+<path d="M1170.0,22 l30,0" stroke-width="1.4" stroke="#5d676c" marker-end="url(#ah-p)"/>
+<text x="1294.0" y="17.5" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">重大事故・</text>
+<text x="1294.0" y="34.5" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e2528">利用への影響</text>
+<g id="edges">
+<path d="M290.0,103.0 C313.0,103.0 313.0,261.2 335.0,261.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_salt" data-t="N_corr"/>
+<path d="M290.0,164.0 C313.0,164.0 313.0,267.9 335.0,267.9" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_constr" data-t="N_corr"/>
+<path d="M290.0,244.3 C313.0,244.3 313.0,281.3 335.0,281.3" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_olddes" data-t="N_corr"/>
+<path d="M290.0,290.0 C313.0,290.0 313.0,211.0 335.0,211.0" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_load" data-t="N_crack"/>
+<path d="M508.0,200.2 C528.0,200.2 528.0,274.6 510.0,274.6" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_crack" data-t="N_corr"/>
+<path d="M508.0,271.2 C531.0,271.2 531.0,195.2 553.0,195.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_corr" data-t="P_spall"/>
+<path d="M726.0,211.5 C746.0,211.5 746.0,255.0 728.0,255.0" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_spall" data-t="P_loss"/>
+<path d="M726.0,179.0 C749.0,179.0 749.0,220.8 771.0,220.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_spall" data-t="R_deck"/>
+<path d="M726.0,271.2 C749.0,271.2 749.0,245.8 771.0,245.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_loss" data-t="R_deck"/>
+<path d="M290.0,222.2 C531.0,222.2 531.0,233.2 771.0,233.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_olddes" data-t="R_deck"/>
+<path d="M944.0,224.9 C967.0,224.9 967.0,216.6 989.0,216.6" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="R_deck" data-t="X_deck"/>
+<path d="M290.0,302.5 C640.0,302.5 640.0,224.9 989.0,224.9" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_load" data-t="X_deck"/>
+<path d="M290.0,363.5 C640.0,363.5 640.0,233.2 989.0,233.2" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_wave" data-t="X_deck"/>
+<path d="M290.0,811.2 C640.0,811.2 640.0,241.6 989.0,241.6" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_tsunami" data-t="X_deck"/>
+<path d="M290.0,987.9 C640.0,987.9 640.0,249.9 989.0,249.9" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_berth" data-t="X_deck"/>
+<path d="M1162.0,224.9 C1185.0,224.9 1185.0,233.2 1207.0,233.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_deck" data-t="Z_accident"/>
+<path d="M726.0,195.2 C967.0,195.2 967.0,220.8 1207.0,220.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_spall" data-t="Z_accident"/>
+<path d="M1162.0,241.6 C1185.0,241.6 1185.0,1022.8 1207.0,1022.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_deck" data-t="Z_limited"/>
+<path d="M944.0,241.6 C1076.0,241.6 1076.0,1032.8 1207.0,1032.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="R_deck" data-t="Z_limited"/>
+<path d="M508.0,221.8 C531.0,221.8 531.0,271.2 553.0,271.2" stroke="#a8327a" fill="none" stroke-width="1.8" stroke-dasharray="9 3 2 3" marker-end="url(#ah-c)" data-s="N_crack" data-t="P_loss"/>
+<path d="M290.0,315.0 C422.0,315.0 422.0,287.5 553.0,287.5" stroke="#a8327a" fill="none" stroke-width="1.8" stroke-dasharray="9 3 2 3" marker-end="url(#ah-c)" data-s="F_load" data-t="P_loss"/>
+<path d="M290.0,445.5 C313.0,445.5 313.0,519.7 335.0,519.7" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_corrzone" data-t="N_pilecorr"/>
+<path d="M290.0,522.2 C313.0,522.2 313.0,541.3 335.0,541.3" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_protect" data-t="N_pilecorr"/>
+<path d="M508.0,530.5 C531.0,530.5 531.0,530.5 553.0,530.5" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_pilecorr" data-t="P_thin"/>
+<path d="M726.0,530.5 C749.0,530.5 749.0,522.2 771.0,522.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_thin" data-t="R_pile"/>
+<path d="M290.0,607.2 C531.0,607.2 531.0,538.8 771.0,538.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_piledes" data-t="R_pile"/>
+<path d="M944.0,530.5 C967.0,530.5 967.0,481.2 989.0,481.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="R_pile" data-t="X_pile"/>
+<path d="M290.0,683.7 C640.0,683.7 640.0,494.2 989.0,494.2" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_quake" data-t="X_pile"/>
+<path d="M726.0,768.6 C858.0,768.6 858.0,507.2 989.0,507.2" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="P_flow" data-t="X_pile"/>
+<path d="M944.0,789.0 C967.0,789.0 967.0,520.2 989.0,520.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="R_soil" data-t="X_pile"/>
+<path d="M1162.0,494.2 C1182.0,494.2 1182.0,568.5 1164.0,568.5" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_pile" data-t="X_collapse"/>
+<path d="M1162.0,507.2 C1194.0,507.2 1194.0,959.2 1164.0,959.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_pile" data-t="X_resid"/>
+<path d="M1162.0,481.2 C1185.0,481.2 1185.0,519.4 1207.0,519.4" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_pile" data-t="Z_restore"/>
+<path d="M1162.0,520.2 C1185.0,520.2 1185.0,1042.8 1207.0,1042.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_pile" data-t="Z_limited"/>
+<path d="M1162.0,580.6 C1185.0,580.6 1185.0,766.8 1207.0,766.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_collapse" data-t="Z_stop"/>
+<path d="M1162.0,568.5 C1185.0,568.5 1185.0,541.6 1207.0,541.6" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_collapse" data-t="Z_restore"/>
+<path d="M1162.0,556.4 C1185.0,556.4 1185.0,245.8 1207.0,245.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_collapse" data-t="Z_accident"/>
+<path d="M290.0,739.2 C313.0,739.2 313.0,759.3 335.0,759.3" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_ground" data-t="N_liq"/>
+<path d="M290.0,694.8 C313.0,694.8 313.0,742.7 335.0,742.7" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_quake" data-t="N_liq"/>
+<path d="M508.0,742.7 C531.0,742.7 531.0,802.6 553.0,802.6" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_liq" data-t="P_flow"/>
+<path d="M290.0,761.3 C422.0,761.3 422.0,775.4 553.0,775.4" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_ground" data-t="P_flow"/>
+<path d="M508.0,759.3 C640.0,759.3 640.0,780.7 771.0,780.7" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_liq" data-t="R_soil"/>
+<path d="M290.0,880.5 C313.0,880.5 313.0,830.3 335.0,830.3" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_current" data-t="N_scour"/>
+<path d="M290.0,827.8 C313.0,827.8 313.0,808.7 335.0,808.7" stroke="#c0582e" fill="none" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)" data-s="F_tsunami" data-t="N_scour"/>
+<path d="M508.0,819.5 C640.0,819.5 640.0,797.3 771.0,797.3" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_scour" data-t="R_soil"/>
+<path d="M726.0,789.0 C858.0,789.0 858.0,789.0 989.0,789.0" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_flow" data-t="X_retain"/>
+<path d="M726.0,809.4 C858.0,809.4 858.0,980.8 989.0,980.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_flow" data-t="X_resid"/>
+<path d="M1162.0,799.8 C1188.0,799.8 1188.0,1035.2 1164.0,1035.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_retain" data-t="X_bridge"/>
+<path d="M1162.0,778.2 C1185.0,778.2 1185.0,777.9 1207.0,777.9" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_retain" data-t="Z_stop"/>
+<path d="M290.0,1010.1 C313.0,1010.1 313.0,1024.2 335.0,1024.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_berth" data-t="N_fender"/>
+<path d="M290.0,1076.5 C313.0,1076.5 313.0,1051.3 335.0,1051.3" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="F_rubber" data-t="N_fender"/>
+<path d="M508.0,1037.8 C531.0,1037.8 531.0,1037.8 553.0,1037.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="N_fender" data-t="P_fender"/>
+<path d="M726.0,1037.8 C749.0,1037.8 749.0,1037.8 771.0,1037.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="P_fender" data-t="R_fender"/>
+<path d="M944.0,1037.8 C967.0,1037.8 967.0,1113.8 989.0,1113.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="R_fender" data-t="X_berthing"/>
+<path d="M1162.0,986.2 C1182.0,986.2 1182.0,1056.8 1164.0,1056.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_resid" data-t="X_bridge"/>
+<path d="M1162.0,970.0 C1185.0,970.0 1185.0,1052.8 1207.0,1052.8" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_resid" data-t="Z_limited"/>
+<path d="M1162.0,953.8 C1185.0,953.8 1185.0,789.0 1207.0,789.0" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_resid" data-t="Z_stop"/>
+<path d="M1162.0,1046.0 C1185.0,1046.0 1185.0,800.1 1207.0,800.1" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_bridge" data-t="Z_stop"/>
+<path d="M1162.0,1113.8 C1185.0,1113.8 1185.0,811.2 1207.0,811.2" stroke="#7d878c" fill="none" stroke-width="1.3" marker-end="url(#ah-p)" data-s="X_berthing" data-t="Z_stop"/>
+</g>
+<g id="nodes">
+<g class="node k-env" data-id="F_salt" tabindex="0" role="button" aria-label="海水の飛沫・飛来塩分（上部工の下面）">
+<rect x="118.0" y="78.0" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#dcefe9" stroke="#2f7d6b"/>
+<text x="127.0" y="95.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">海水の飛沫・飛来塩分</text>
+<text x="127.0" y="111.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（上部工の下面）</text>
+</g>
+<g class="node k-des" data-id="F_constr" tabindex="0" role="button" aria-label="施工不良（かぶり不足・打継目・締固め不足）">
+<rect x="118.0" y="139.0" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#e7e4f4" stroke="#5b4fa0"/>
+<text x="127.0" y="156.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">施工不良（かぶり不足・</text>
+<text x="127.0" y="172.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">打継目・締固め不足）</text>
+<circle cx="279.0" cy="141.0" r="8.5" fill="#8a4b14"/>
+<text x="279.0" y="141.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-des" data-id="F_olddes" tabindex="0" role="button" aria-label="旧基準による上部工の設計（かぶりが小さい・水セメント比が大きい・震度法）">
+<rect x="118.0" y="200.0" width="172" height="66.5" rx="9" stroke-width="1.2" fill="#e7e4f4" stroke="#5b4fa0"/>
+<text x="127.0" y="217.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">旧基準による上部工の設計</text>
+<text x="127.0" y="233.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（かぶりが小さい・水セメ</text>
+<text x="127.0" y="250.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">ント比が大きい・震度法）</text>
+<circle cx="279.0" cy="202.0" r="8.5" fill="#2c5a78"/>
+<text x="279.0" y="202.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">復</text>
+</g>
+<g class="node k-act" data-id="F_load" tabindex="0" role="button" aria-label="荷役機械・車両の荷重（上載荷重）">
+<rect x="118.0" y="277.5" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#fbe3d6" stroke="#c0582e"/>
+<text x="127.0" y="294.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">荷役機械・車両の荷重</text>
+<text x="127.0" y="311.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（上載荷重）</text>
+</g>
+<g class="node k-act" data-id="F_wave" tabindex="0" role="button" aria-label="高潮・波浪の揚圧力（台風）">
+<rect x="118.0" y="338.5" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#fbe3d6" stroke="#c0582e"/>
+<text x="127.0" y="355.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">高潮・波浪の揚圧力</text>
+<text x="127.0" y="372.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（台風）</text>
+</g>
+<g class="node k-dmg" data-id="N_crack" tabindex="0" role="button" aria-label="ひびわれ（収縮・温度・荷重）">
+<rect x="336.0" y="178.5" width="172" height="65.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="345.0" y="195.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">ひびわれ</text>
+<text x="345.0" y="212.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（収縮・温度・荷重）</text>
+<text x="345.0" y="231.5" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 上部工</text>
+</g>
+<g class="node k-dmg" data-id="N_corr" tabindex="0" role="button" aria-label="鉄筋の腐食の開始">
+<rect x="336.0" y="254.5" width="172" height="33.5" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="345.0" y="271.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">鉄筋の腐食の開始</text>
+<circle cx="497.0" cy="256.5" r="8.5" fill="#8a4b14"/>
+<text x="497.0" y="257.0" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-dmg" data-id="P_spall" tabindex="0" role="button" aria-label="腐食ひびわれ・錆汁・うき・剥落・鉄筋露出">
+<rect x="554.0" y="162.8" width="172" height="65.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="563.0" y="180.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">腐食ひびわれ・錆汁・</text>
+<text x="563.0" y="196.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">うき・剥落・鉄筋露出</text>
+<text x="563.0" y="215.8" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 上部工</text>
+<circle cx="715.0" cy="164.8" r="8.5" fill="#8a4b14"/>
+<text x="715.0" y="165.2" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-dmg" data-id="P_loss" tabindex="0" role="button" aria-label="鉄筋の断面欠損（梁・床版の下面）">
+<rect x="554.0" y="238.8" width="172" height="65.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="563.0" y="256.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">鉄筋の断面欠損</text>
+<text x="563.0" y="272.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（梁・床版の下面）</text>
+<text x="563.0" y="291.8" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 上部工</text>
+<circle cx="715.0" cy="240.8" r="8.5" fill="#8a4b14"/>
+<text x="715.0" y="241.2" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-perf" data-id="R_deck" tabindex="0" role="button" aria-label="床版・梁の曲げ・せん断耐力の低下">
+<rect x="772.0" y="208.2" width="172" height="50.0" rx="3" stroke-width="1.2" fill="#fff3d1" stroke="#a87b12"/>
+<text x="781.0" y="225.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">床版・梁の曲げ・せん断</text>
+<text x="781.0" y="242.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">耐力の低下</text>
+<circle cx="933.0" cy="210.2" r="8.5" fill="#2c5a78"/>
+<text x="933.0" y="210.8" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">復</text>
+<circle cx="913.0" cy="210.2" r="8.5" fill="#2e6b3f"/>
+<text x="913.0" y="210.8" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-fail" data-id="X_deck" tabindex="0" role="button" aria-label="床版の抜け落ち・梁の破壊">
+<rect x="990.0" y="208.2" width="172" height="50.0" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="225.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">床版の抜け落ち・</text>
+<text x="999.0" y="242.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">梁の破壊</text>
+</g>
+<g class="node k-acc" data-id="Z_accident" tabindex="0" role="button" aria-label="荷役中の事故・人身災害">
+<rect x="1208.0" y="208.2" width="172" height="50.0" rx="3" stroke-width="2.0" fill="#2b3034" stroke="#2b3034"/>
+<text x="1217.0" y="225.5" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">荷役中の事故・</text>
+<text x="1217.0" y="242.0" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">人身災害</text>
+</g>
+<g class="node k-env" data-id="F_corrzone" tabindex="0" role="button" aria-label="海水・干満・飛沫（鋼管の腐食環境）">
+<rect x="118.0" y="420.5" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#dcefe9" stroke="#2f7d6b"/>
+<text x="127.0" y="437.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">海水・干満・飛沫</text>
+<text x="127.0" y="454.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（鋼管の腐食環境）</text>
+</g>
+<g class="node k-des" data-id="F_protect" tabindex="0" role="button" aria-label="防食工の不備・劣化（被覆の損傷・陽極の消耗・腐食代の不足）">
+<rect x="118.0" y="481.5" width="172" height="81.5" rx="9" stroke-width="1.2" fill="#e7e4f4" stroke="#5b4fa0"/>
+<text x="127.0" y="498.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">防食工の不備・劣化</text>
+<text x="127.0" y="515.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（被覆の損傷・陽極の</text>
+<text x="127.0" y="531.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">消耗・腐食代の不足）</text>
+<text x="127.0" y="551.0" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 防食工</text>
+<circle cx="279.0" cy="483.5" r="8.5" fill="#8a4b14"/>
+<text x="279.0" y="484.0" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-des" data-id="F_piledes" tabindex="0" role="button" aria-label="杭の設計（径厚比 D/t・腐食代・旧基準の耐震）">
+<rect x="118.0" y="574.0" width="172" height="66.5" rx="9" stroke-width="1.2" fill="#e7e4f4" stroke="#5b4fa0"/>
+<text x="127.0" y="591.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">杭の設計</text>
+<text x="127.0" y="607.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（径厚比 D/t・腐食代・</text>
+<text x="127.0" y="624.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">旧基準の耐震）</text>
+<circle cx="279.0" cy="576.0" r="8.5" fill="#2c5a78"/>
+<text x="279.0" y="576.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">復</text>
+</g>
+<g class="node k-dmg" data-id="N_pilecorr" tabindex="0" role="button" aria-label="鋼管杭の腐食（集中腐食・孔食）">
+<rect x="336.0" y="498.0" width="172" height="65.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="345.0" y="515.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">鋼管杭の腐食</text>
+<text x="345.0" y="531.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（集中腐食・孔食）</text>
+<text x="345.0" y="551.0" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 鋼管杭・防食工</text>
+<circle cx="497.0" cy="500.0" r="8.5" fill="#8a4b14"/>
+<text x="497.0" y="500.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-dmg" data-id="P_thin" tabindex="0" role="button" aria-label="肉厚の減少・開孔">
+<rect x="554.0" y="506.2" width="172" height="48.5" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="563.0" y="523.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">肉厚の減少・開孔</text>
+<text x="563.0" y="542.8" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 鋼管杭</text>
+<circle cx="715.0" cy="508.2" r="8.5" fill="#8a4b14"/>
+<text x="715.0" y="508.8" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-perf" data-id="R_pile" tabindex="0" role="button" aria-label="杭の全塑性モーメント・局部座屈ひずみの低下">
+<rect x="772.0" y="505.5" width="172" height="50.0" rx="3" stroke-width="1.2" fill="#fff3d1" stroke="#a87b12"/>
+<text x="781.0" y="522.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">杭の全塑性モーメント・</text>
+<text x="781.0" y="539.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">局部座屈ひずみの低下</text>
+<circle cx="933.0" cy="507.5" r="8.5" fill="#2c5a78"/>
+<text x="933.0" y="508.0" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">復</text>
+<circle cx="913.0" cy="507.5" r="8.5" fill="#2e6b3f"/>
+<text x="913.0" y="508.0" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-fail" data-id="X_pile" tabindex="0" role="button" aria-label="杭の全塑性・局部座屈（杭頭・地中部）">
+<rect x="990.0" y="468.2" width="172" height="65.0" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="485.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">杭の全塑性・局部座屈</text>
+<text x="999.0" y="502.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">（杭頭・地中部）</text>
+<text x="999.0" y="521.2" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 鋼管杭</text>
+<circle cx="1151.0" cy="470.2" r="8.5" fill="#2e6b3f"/>
+<text x="1151.0" y="470.8" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-fail" data-id="X_collapse" tabindex="0" role="button" aria-label="桟橋の大変形・倒壊">
+<rect x="990.0" y="544.2" width="172" height="48.5" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="561.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">桟橋の大変形・倒壊</text>
+<text x="999.0" y="580.8" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 法線</text>
+</g>
+<g class="node k-acc" data-id="Z_restore" tabindex="0" role="button" aria-label="長期の復旧（杭の打替え・上部工の撤去と再構築）">
+<rect x="1208.0" y="497.2" width="172" height="66.5" rx="3" stroke-width="2.0" fill="#2b3034" stroke="#2b3034"/>
+<text x="1217.0" y="514.5" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">長期の復旧</text>
+<text x="1217.0" y="531.0" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">（杭の打替え・上部工の</text>
+<text x="1217.0" y="547.5" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">撤去と再構築）</text>
+</g>
+<g class="node k-act" data-id="F_quake" tabindex="0" role="button" aria-label="地震動">
+<rect x="118.0" y="672.5" width="172" height="33.5" rx="9" stroke-width="1.2" fill="#fbe3d6" stroke="#c0582e"/>
+<text x="127.0" y="689.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">地震動</text>
+</g>
+<g class="node k-des" data-id="F_ground" tabindex="0" role="button" aria-label="地盤（置換砂・埋土の液状化しやすさ・捨石斜面の勾配）">
+<rect x="118.0" y="717.0" width="172" height="66.5" rx="9" stroke-width="1.2" fill="#e7e4f4" stroke="#5b4fa0"/>
+<text x="127.0" y="734.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">地盤（置換砂・埋土の</text>
+<text x="127.0" y="750.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">液状化しやすさ・</text>
+<text x="127.0" y="767.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">捨石斜面の勾配）</text>
+</g>
+<g class="node k-act" data-id="F_tsunami" tabindex="0" role="button" aria-label="津波（波力・浮力・引き波・漂流物）">
+<rect x="118.0" y="794.5" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#fbe3d6" stroke="#c0582e"/>
+<text x="127.0" y="811.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">津波（波力・浮力・</text>
+<text x="127.0" y="828.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">引き波・漂流物）</text>
+</g>
+<g class="node k-act" data-id="F_current" tabindex="0" role="button" aria-label="船舶のプロペラ流・潮流">
+<rect x="118.0" y="855.5" width="172" height="50.0" rx="9" stroke-width="1.2" fill="#fbe3d6" stroke="#c0582e"/>
+<text x="127.0" y="872.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">船舶のプロペラ流・</text>
+<text x="127.0" y="889.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">潮流</text>
+</g>
+<g class="node k-dmg" data-id="N_liq" tabindex="0" role="button" aria-label="液状化（置換砂・埋土）">
+<rect x="336.0" y="726.0" width="172" height="50.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="345.0" y="743.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">液状化</text>
+<text x="345.0" y="759.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（置換砂・埋土）</text>
+</g>
+<g class="node k-dmg" data-id="N_scour" tabindex="0" role="button" aria-label="捨石の吸出し・海底の洗掘">
+<rect x="336.0" y="787.0" width="172" height="65.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="345.0" y="804.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">捨石の吸出し・</text>
+<text x="345.0" y="820.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">海底の洗掘</text>
+<text x="345.0" y="840.0" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 海底</text>
+<circle cx="497.0" cy="789.0" r="8.5" fill="#8a4b14"/>
+<text x="497.0" y="789.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">局</text>
+</g>
+<g class="node k-dmg" data-id="P_flow" tabindex="0" role="button" aria-label="側方流動（斜面・土留部の海側への移動）">
+<rect x="554.0" y="748.2" width="172" height="81.5" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="563.0" y="765.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">側方流動</text>
+<text x="563.0" y="782.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（斜面・土留部の</text>
+<text x="563.0" y="798.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">海側への移動）</text>
+<text x="563.0" y="817.8" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 土留部</text>
+<circle cx="715.0" cy="750.2" r="8.5" fill="#2e6b3f"/>
+<text x="715.0" y="750.8" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-perf" data-id="R_soil" tabindex="0" role="button" aria-label="杭の水平抵抗・支持力の低下">
+<rect x="772.0" y="764.0" width="172" height="50.0" rx="3" stroke-width="1.2" fill="#fff3d1" stroke="#a87b12"/>
+<text x="781.0" y="781.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">杭の水平抵抗・</text>
+<text x="781.0" y="797.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">支持力の低下</text>
+<circle cx="933.0" cy="766.0" r="8.5" fill="#2e6b3f"/>
+<text x="933.0" y="766.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-fail" data-id="X_retain" tabindex="0" role="button" aria-label="土留部・背後地盤の移動・沈下">
+<rect x="990.0" y="756.5" width="172" height="65.0" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="773.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">土留部・背後地盤の</text>
+<text x="999.0" y="790.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">移動・沈下</text>
+<text x="999.0" y="809.5" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 土留部・エプロン</text>
+</g>
+<g class="node k-acc" data-id="Z_stop" tabindex="0" role="button" aria-label="岸壁の利用停止（物流・緊急物資輸送の途絶）">
+<rect x="1208.0" y="755.8" width="172" height="66.5" rx="3" stroke-width="2.0" fill="#2b3034" stroke="#2b3034"/>
+<text x="1217.0" y="773.0" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">岸壁の利用停止</text>
+<text x="1217.0" y="789.5" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">（物流・緊急物資輸送</text>
+<text x="1217.0" y="806.0" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">の途絶）</text>
+<circle cx="1369.0" cy="757.8" r="8.5" fill="#2e6b3f"/>
+<text x="1369.0" y="758.2" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-act" data-id="F_berth" tabindex="0" role="button" aria-label="船舶の接岸・係留（接岸力・牽引力・接触）">
+<rect x="118.0" y="965.8" width="172" height="66.5" rx="9" stroke-width="1.2" fill="#fbe3d6" stroke="#c0582e"/>
+<text x="127.0" y="983.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">船舶の接岸・係留</text>
+<text x="127.0" y="999.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（接岸力・牽引力・</text>
+<text x="127.0" y="1016.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">接触）</text>
+</g>
+<g class="node k-env" data-id="F_rubber" tabindex="0" role="button" aria-label="紫外線・海水（防舷材のゴム・取付ボルト）">
+<rect x="118.0" y="1043.2" width="172" height="66.5" rx="9" stroke-width="1.2" fill="#dcefe9" stroke="#2f7d6b"/>
+<text x="127.0" y="1060.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">紫外線・海水</text>
+<text x="127.0" y="1077.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（防舷材のゴム・</text>
+<text x="127.0" y="1093.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">取付ボルト）</text>
+</g>
+<g class="node k-dmg" data-id="N_fender" tabindex="0" role="button" aria-label="防舷材・係船柱の劣化（ゴムの亀裂・取付部の腐食）">
+<rect x="336.0" y="997.0" width="172" height="81.5" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="345.0" y="1014.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">防舷材・係船柱の劣化</text>
+<text x="345.0" y="1030.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528">（ゴムの亀裂・</text>
+<text x="345.0" y="1047.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528">取付部の腐食）</text>
+<text x="345.0" y="1066.5" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 附帯設備</text>
+</g>
+<g class="node k-dmg" data-id="P_fender" tabindex="0" role="button" aria-label="防舷材の損傷・脱落、係船柱の基部の損傷">
+<rect x="554.0" y="1005.2" width="172" height="65.0" rx="3" stroke-width="1.2" fill="#ffffff" stroke="#8a9499"/>
+<text x="563.0" y="1022.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">防舷材の損傷・脱落、</text>
+<text x="563.0" y="1039.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">係船柱の基部の損傷</text>
+<text x="563.0" y="1058.2" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 附帯設備</text>
+</g>
+<g class="node k-perf" data-id="R_fender" tabindex="0" role="button" aria-label="接岸・係留の機能の低下">
+<rect x="772.0" y="1012.8" width="172" height="50.0" rx="3" stroke-width="1.2" fill="#fff3d1" stroke="#a87b12"/>
+<text x="781.0" y="1030.0" font-size="12.5" dominant-baseline="middle" fill="#1e2528">接岸・係留の機能の</text>
+<text x="781.0" y="1046.5" font-size="12.5" dominant-baseline="middle" fill="#1e2528">低下</text>
+</g>
+<g class="node k-fail" data-id="X_resid" tabindex="0" role="button" aria-label="上部工の過大な残留変位（法線のはらみ出し）">
+<rect x="990.0" y="937.5" width="172" height="65.0" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="954.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">上部工の過大な残留変位</text>
+<text x="999.0" y="971.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">（法線のはらみ出し）</text>
+<text x="999.0" y="990.5" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 法線</text>
+<circle cx="1151.0" cy="939.5" r="8.5" fill="#2e6b3f"/>
+<text x="1151.0" y="940.0" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+<g class="node k-fail" data-id="X_bridge" tabindex="0" role="button" aria-label="渡版の外れ・段差、荷役機械の走行不能">
+<rect x="990.0" y="1013.5" width="172" height="65.0" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="1030.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">渡版の外れ・段差、</text>
+<text x="999.0" y="1047.2" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">荷役機械の走行不能</text>
+<text x="999.0" y="1066.5" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 渡版・エプロン</text>
+</g>
+<g class="node k-fail" data-id="X_berthing" tabindex="0" role="button" aria-label="接岸・係留の不能">
+<rect x="990.0" y="1089.5" width="172" height="48.5" rx="3" stroke-width="2.0" fill="#f8dcd9" stroke="#a33a2e"/>
+<text x="999.0" y="1106.8" font-size="12.5" dominant-baseline="middle" fill="#1e2528" font-weight="700">接岸・係留の不能</text>
+<text x="999.0" y="1126.0" font-size="10.5" dominant-baseline="middle" fill="#5d676c">点検 附帯設備</text>
+</g>
+<g class="node k-acc" data-id="Z_limited" tabindex="0" role="button" aria-label="利用の制限（荷重・船舶の制限）">
+<rect x="1208.0" y="1012.8" width="172" height="50.0" rx="3" stroke-width="2.0" fill="#2b3034" stroke="#2b3034"/>
+<text x="1217.0" y="1030.0" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">利用の制限</text>
+<text x="1217.0" y="1046.5" font-size="12.5" dominant-baseline="middle" fill="#ffffff" font-weight="700">（荷重・船舶の制限）</text>
+<circle cx="1369.0" cy="1014.8" r="8.5" fill="#2e6b3f"/>
+<text x="1369.0" y="1015.2" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">計</text>
+</g>
+</g><rect x="0" y="1172" width="1410" height="80" fill="#ffffff"/><g transform="translate(0,1172)"><rect x="14" y="8" width="22" height="14" rx="3" fill="#fbe3d6" stroke="#c0582e" stroke-width="1.2"/><text x="42" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">作用</text>
+<rect x="86" y="8" width="22" height="14" rx="3" fill="#dcefe9" stroke="#2f7d6b" stroke-width="1.2"/><text x="114" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">環境</text>
+<rect x="158" y="8" width="22" height="14" rx="3" fill="#e7e4f4" stroke="#5b4fa0" stroke-width="1.2"/><text x="186" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">設計・施工・地盤</text>
+<rect x="308" y="8" width="22" height="14" rx="3" fill="#ffffff" stroke="#8a9499" stroke-width="1.2"/><text x="336" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">変状</text>
+<rect x="380" y="8" width="22" height="14" rx="3" fill="#fff3d1" stroke="#a87b12" stroke-width="1.2"/><text x="408" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">性能の低下</text>
+<rect x="491" y="8" width="22" height="14" rx="3" fill="#f8dcd9" stroke="#a33a2e" stroke-width="1.2"/><text x="519" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">破壊</text>
+<rect x="563" y="8" width="22" height="14" rx="3" fill="#2b3034" stroke="#2b3034" stroke-width="1.2"/><text x="591" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">重大事故・利用への影響</text>
+<path d="M752,15 l36,0" stroke="#7d878c" stroke-width="1.3" marker-end="url(#ah-p)"/><text x="796" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">進展</text>
+<path d="M842,15 l36,0" stroke="#c0582e" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)"/><text x="886" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">引き金となる外力</text>
+<path d="M1012,15 l36,0" stroke="#a8327a" stroke-width="1.8" stroke-dasharray="9 3 2 3" marker-end="url(#ah-c)"/><text x="1056" y="15.5" font-size="12" dominant-baseline="middle" fill="#1e2528">連成（互いに進め合う）</text>
+<circle cx="22" cy="42" r="8.5" fill="#2c5a78"/><text x="22" y="42.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#fff">復</text><text x="36" y="42.5" font-size="12" dominant-baseline="middle" fill="#1e2528">図面・復元設計で初期値を推定</text>
+<circle cx="241.0" cy="42" r="8.5" fill="#8a4b14"/><text x="241.0" y="42.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#fff">局</text><text x="255.0" y="42.5" font-size="12" dominant-baseline="middle" fill="#1e2528">劣化が局所化しやすい</text>
+<circle cx="410.0" cy="42" r="8.5" fill="#2e6b3f"/><text x="410.0" y="42.5" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#fff">計</text><text x="424.0" y="42.5" font-size="12" dominant-baseline="middle" fill="#1e2528">rcframe の利用可否シナリオで計算</text>
+<text x="14" y="66.5" font-size="11" dominant-baseline="middle" fill="#5d676c">「点検 上部工」などは港湾の施設の点検診断ガイドライン（国土交通省港湾局）の桟橋の点検診断項目を参考にした部位の名称（原文で要確認）。</text></g></svg>
