@@ -91,7 +91,7 @@ U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位�
 
 ## 変状連鎖の重点シナリオの確率評価（README.md 参照、各段階はユーザー承認後に着手）
 D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、洗掘）→ D2 済: 劣化のモデル（port_deterioration.py、scenarios.deterioration）
-→ D3 済: 土留部・渡版の判定（後処理、usability.retaining・limits.bridge_opening/apron_step）→ D4: 川崎港の計算（40・60 年 × 常時・L1・L2）→ D5: 報告
+→ D3 済: 土留部・渡版の判定（後処理、usability.retaining・limits.bridge_opening/apron_step）→ D4 済: 川崎港の計算（examples/kawasaki_deterioration.py）→ D5: 報告
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
