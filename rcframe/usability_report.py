@@ -19,7 +19,7 @@ from .port_batch import COLUMNS, analyze
 from .port_cards import CARD_CSS, INDEX_JS, STATUS_CLS, allowable_bars, damage_frame, damage_levels, \
     scenario_table, sorted_final, summary_parts
 from .port_level2 import VERIFY_ITEMS as L2_VERIFY, pile_capacity, pipe_mp
-from .port_usability import LOAD_NAME, LOAD_UNIT, STATUS, VERIFY_ITEMS as USE_VERIFY, final_rows
+from .port_usability import LOAD_NAME, STATUS, VERIFY_ITEMS as USE_VERIFY, final_rows, load_text
 from .report import Raw, assemble_html, figure, table
 from .results import Result
 
@@ -297,7 +297,7 @@ def sec_criteria(pier, ctx):
             rows.append([name, "1 以上" if lim[k] == "limited" else "-", "1 以上" if lim[k] == "unusable" else "-"])
     rows.append(["許容荷重", "必要な荷重を下回る", "0（載せられない）"])
     out = [table(["項目", "制限付き利用", "利用不可"], rows),
-           table(["荷重", "必要な値"], [[LOAD_NAME[k], f"{v:g} {LOAD_UNIT[k]}"] for k, v in opts["required"].items()]),
+           table(["荷重", "必要な値"], [[LOAD_NAME[k], load_text(k, v)] for k, v in opts["required"].items()]),
            table(["許容荷重の限界", "設定"], [["杭", {"plastic": "塑性回転が増えない", "buckling": "局部座屈しない",
                                                    "none": "考慮しない"}[opts["pile"]]],
                                          ["上部工の梁", "|M| ≦ Mu" if opts["deck_mu"] else "考慮しない"],

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .report import CSS, Raw, figure, table
 from .svg import View, circle, line, poly, svg, text, xy_chart
-from .port_usability import LOAD_NAME, LOAD_UNIT, STATUS, final_rows, probability_summary
+from .port_usability import LOAD_NAME, STATUS, final_rows, load_text, probability_summary
 
 M = 1e3
 STATUS_CLS = {STATUS[0]: "st0", STATUS[1]: "st1", STATUS[2]: "st2"}
@@ -159,7 +159,8 @@ def allowable_bars(row, opts, width=720):
         body.append(f'<rect class="{"bar-ok" if a >= req else "bar-ng"}" x="{ml}" y="{y}" '
                     f'width="{W * r / 2:.1f}" height="{h}"/>')
         body.append(text((ml - 8, y + h / 2), LOAD_NAME[kind], "axlbl", anchor="end", dy=4))
-        body.append(text((ml + W + 8, y + h / 2), f"{a:,.1f} / {req:g} {LOAD_UNIT[kind]}", "axlbl", anchor="start", dy=4))
+        body.append(text((ml + W + 8, y + h / 2), f"{load_text(kind, a, ',.1f')} / {load_text(kind, req)}", "axlbl",
+                         anchor="start", dy=4))
     H = 10 + len(items) * (h + 12)
     body.append(line((ml + W / 2, 4), (ml + W / 2, H), "req"))
     body.append(text((ml + W / 2, H + 14), "必要な荷重", "axlbl"))
@@ -184,7 +185,10 @@ def card_html(pier, row, fr, opts, params):
           ("降伏したヒンジ", f"{row['n_yield']} 箇所"),
           ("局部座屈", "-" if row.get("n_buckled") is None else f"{row['n_buckled']} 箇所"),
           ("最大ひずみ（推定）", _fmt(row.get("max_strain"), "{:.5f}")),
-          ("降伏した地盤ばね", f"{row['soil_yield']} 箇所")]
+          ("降伏した地盤ばね", f"{row['soil_yield']} 箇所"),
+          ("本震時の上部工の梁 M/Mu（最大）", _fmt(row.get("deck_mu_max"), "{:.2f}")),
+          ("杭の軸力 / 設計支持力（最大）", _fmt(row.get("pile_axial_max"), "{:.2f}")),
+          ("杭の残留 |M|/My（最大）", _fmt(row.get("pile_m_res"), "{:.2f}"))]
     if row.get("bridge_rel") is not None:
         kv += [("土留部の移動（仮定）", f"{row['wall_move']:.3f} m"), ("渡版の開き（上部工 − 土留部）", f"{row['bridge_rel']:.3f} m"),
                ("土留部の背後の段差（仮定）", f"{row['apron_step']:.3f} m")]
@@ -196,7 +200,7 @@ def card_html(pier, row, fr, opts, params):
             parts.append("<h3>被災後の許容荷重</h3>")
             parts.append(figure(bars, "許容荷重（限界に達する荷重）と必要な荷重。緑: 足りる、赤: 不足"))
             parts.append(table(["荷重", "許容値", "必要な値", "決めた限界"],
-                               [[LOAD_NAME[k], f"{row[f'allow_{k}']:,.1f} {LOAD_UNIT[k]}", f"{req:g} {LOAD_UNIT[k]}",
+                               [[LOAD_NAME[k], load_text(k, row[f"allow_{k}"], ",.1f"), load_text(k, req),
                                  row.get(f"allow_{k}_by", "")]
                                 for k, req in opts["required"].items() if row.get(f"allow_{k}") is not None]))
     fig, name, scale = damage_frame(pier, fr, levels)
@@ -234,7 +238,7 @@ def summary_parts(rows, opts, h="h3"):
                     for k, (p, se) in s["status"].items()], num=(1, 2, 3))]
     if s["allow"]:
         parts.append(table(["荷重", "必要な値", "許容値が不足する割合", "標準誤差"],
-                           [[LOAD_NAME[k], f"{opts['required'][k]:g} {LOAD_UNIT[k]}", f"{p:.1%}", f"{se:.1%}"]
+                           [[LOAD_NAME[k], load_text(k, opts["required"][k]), f"{p:.1%}", f"{se:.1%}"]
                             for k, (p, se) in s["allow"].items()], num=(2, 3)))
     series, notes, fits = [], [], []
     xs = [float(r["surface"]) for r in fr if not isinstance(r["surface"], str)]

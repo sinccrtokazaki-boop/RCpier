@@ -10,6 +10,10 @@
         pile_axial : 杭の軸力が設計支持力 Rcd（押込み）・Rtd（引抜き）に達する（piles.rows の入力値）
     接岸力は防舷材ごと、牽引力は係船柱ごとに求め、最小値をとる。地震時の長期荷重のうち remove の
     ケース（既定 Ls）は利用時の荷重に置き換えるため、先に取り除く
+    余震（aftershock、ガイドライン 第2版 表 D-5 の余震時、G2）: 上部工の重心に kh·W（地震用重量、port_level2.inertia_pattern）を
+        本震と同じ向き・逆向きに漸増し、同じ限界に最初に達する換算震度 kh を許容値とする（小さい方）。
+        必要な値 required.aftershock は余震として想定する L1 地震動の照査用震度。余震による地盤変位の増加・
+        液状化は扱わない（静的な扱い。ガイドライン 3.5 で静的解析による検討が可能な場合があるとされる）
 判定（usability.limits）: 上部工の残留変位、杭の残留の塑性回転角、杭の損傷の程度、許容荷重と必要な荷重
     から「利用可 / 制限付き利用 / 利用不可」を決め、最も厳しいものをとる
     本震時の条件（港湾施設の利用可否判断に係るガイドライン 第2版 表 D-5、G1）:
@@ -34,14 +38,16 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .grid import InputError, _check_keys, _num
-from .port_level2 import deck_moment, deck_sections
+from .port_level2 import deck_moment, deck_sections, inertia_pattern
 from .port_loads import WeightSum, mooring_force
+from .pushover import _parse_direction
 from .results import Result
 
 M, KN, KN_M2 = 1e3, 1e3, 1e-3
-LOADS = ("surcharge", "berthing", "tractive")
-LOAD_NAME = {"surcharge": "上載荷重", "berthing": "接岸力", "tractive": "牽引力"}
-LOAD_UNIT = {"surcharge": "kN/m²", "berthing": "kN", "tractive": "kN"}
+LOADS = ("surcharge", "berthing", "tractive", "aftershock")
+LOAD_NAME = {"surcharge": "上載荷重", "berthing": "接岸力", "tractive": "牽引力", "aftershock": "余震の震度"}
+LOAD_UNIT = {"surcharge": "kN/m²", "berthing": "kN", "tractive": "kN", "aftershock": ""}
+MAX_DEFAULT = {"surcharge": 200.0, "berthing": 20000.0, "tractive": 20000.0, "aftershock": 1.0}
 STATUS = ("利用可", "制限付き利用", "利用不可")
 LEVELS = ("ok", "limited", "unusable")                                    # 判定の項目ごとの設定 → STATUS の番号
 RETAIN_LIMITS = ("bridge_opening", "bridge_closing", "apron_step")     # 土留部と渡版の閾値 [m]
@@ -49,7 +55,16 @@ RETAIN_KEYS = ("wall_ratio", "settlement", "settlement_ratio")           # シ�
 VERIFY_ITEMS = [
     "利用可否の判定基準（残留変位・杭の塑性回転角・損傷の程度の閾値）。計算例の値は仮の値",
     "許容荷重の限界（杭の塑性化・局部座屈、梁の Mu、杭の支持力）と、利用時の地盤ばねを地震時と同じとする扱い",
+    "余震の照査（G2）: L1 の照査用震度の慣性力を静的に漸増（地盤変位の増加・液状化なし、慣性力の重量は地震用重量）。"
+    "梁の限界は Mu（材料係数 1.0）で、ガイドラインの設計断面耐力とは係数が異なる",
 ]
+
+
+def load_text(kind, v, digits=None):
+    """荷重の値の表示。余震は換算震度（小数 3 桁）、ほかは digits（省略時 :g）と単位"""
+    if kind == "aftershock":
+        return f"kh = {v:.3f}"
+    return f"{v:{digits or 'g'}} {LOAD_UNIT[kind]}"
 
 
 # ============================================================ 入力
@@ -69,8 +84,8 @@ def read_usability(pier, d):
         return None
     _check_keys(d, ("limits", "required", "allowable", "remove", "retaining"), "usability")
     lim = d.get("limits") or {}
-    _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage", "deck_mu", "pile_axial") + RETAIN_LIMITS,
-                "usability.limits")
+    _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage", "deck_mu", "pile_axial", "aftershock")
+                + RETAIN_LIMITS, "usability.limits")
     limits = {}
     for k in ("residual_displacement",) + RETAIN_LIMITS:          # 長さの閾値 [m] → [mm]
         if k in lim:
@@ -86,7 +101,8 @@ def read_usability(pier, d):
         if v not in LEVELS:
             raise InputError(f"usability.limits.pile_damage.{k}: ok / limited / unusable です")
     limits["pile_damage"] = pd
-    for k, dflt in (("deck_mu", "unusable"), ("pile_axial", "limited")):          # 本震時の条件（表 D-5）
+    for k, dflt in (("deck_mu", "unusable"), ("pile_axial", "limited"),            # 本震時の条件（表 D-5）
+                    ("aftershock", "unusable")):                                     # 余震時の条件（表 D-5）
         v = str(lim.get(k, dflt))
         if v not in LEVELS:
             raise InputError(f"usability.limits.{k}: ok / limited / unusable です")
@@ -99,7 +115,7 @@ def read_usability(pier, d):
     pile = str(al.get("pile", "plastic"))
     if pile not in ("plastic", "buckling", "none"):
         raise InputError("usability.allowable.pile: plastic / buckling / none です")
-    mx = {"surcharge": 200.0, "berthing": 20000.0, "tractive": 20000.0}
+    mx = dict(MAX_DEFAULT)
     _check_keys(al.get("max") or {}, LOADS, "usability.allowable.max")
     mx.update({k: _num(v, f"usability.allowable.max.{k}") for k, v in (al.get("max") or {}).items()})
     loads = [str(x) for x in al.get("loads", list(required) or list(LOADS))]
@@ -145,8 +161,9 @@ class Allowable:
     where: str = ""               # 位置（部材・防舷材など）
 
 
-def _unit_cases(pier, opts):
-    """単位荷重のケースを作る。戻り値: {種類: [(ケース名, 位置の説明)]}"""
+def _unit_cases(pier, opts, fr=None):
+    """単位荷重のケースを作る。戻り値: {種類: [(荷重, 位置の説明)]}
+    荷重はケース名（節点・部材荷重）、または余震の慣性力 (pattern, sign)（Incremental.run の pattern・sign）"""
     m = pier.model
     y_face = pier.gy[-1][1] + pier.overhang["sea"]
     out = {}
@@ -168,6 +185,10 @@ def _unit_cases(pier, opts):
             c = f"_利用_T{k}"
             pier._point_load(c, [x, y_face, pier.deck_top], mooring_force(KN, ah, av), c)
             out["tractive"].append((c, f"係船柱 x={x / M:g} m"))
+    if "aftershock" in opts["loads"] and fr is not None:
+        _, sign, d, _ = _parse_direction(fr.case.direction)
+        out["aftershock"] = [((inertia_pattern(pier, d, sign * s)[0], 1.0), where)
+                             for s, where in ((1, "本震と同じ向き"), (-1, "本震と逆向き"))]
     return {k: v for k, v in out.items() if v}
 
 
@@ -181,7 +202,8 @@ def _first_crossing(la, lb, va, vb, limit):
 
 
 def _check_segment(pier, la, lb, fa, fb, case, base, opts, secs, piles):
-    """ステップ [la, lb] の中で最初に限界に達する (荷重係数, 限界の種類, 位置)（なければ None）"""
+    """ステップ [la, lb] の中で最初に限界に達する (荷重係数, 限界の種類, 位置)（なければ None）
+    case: 部材荷重を持つケース名（慣性力のパターンなら None）"""
     best = None
 
     def take(l, gov, where):
@@ -190,8 +212,8 @@ def _check_segment(pier, la, lb, fa, fb, case, base, opts, secs, piles):
             best = (l, gov, where)
     if secs:
         m = pier.model
-        ra = Result(m, "a", {}, {e: {"face": f, "node": f} for e, f in fa.items()}, {}, {**base, case: la})
-        rb = Result(m, "b", {}, {e: {"face": f, "node": f} for e, f in fb.items()}, {}, {**base, case: lb})
+        ra = Result(m, "a", {}, {e: {"face": f, "node": f} for e, f in fa.items()}, {}, {**base, **({case: la} if case else {})})
+        rb = Result(m, "b", {}, {e: {"face": f, "node": f} for e, f in fb.items()}, {}, {**base, **({case: lb} if case else {})})
         for s in secs:
             Ma, Mb = deck_moment(ra, s), deck_moment(rb, s)
             take(_first_crossing(la, lb, Ma / s["Mu_pos"], Mb / s["Mu_pos"], 1.0), "梁の曲げ M = Mu", s["label"])
@@ -206,7 +228,11 @@ def _check_segment(pier, la, lb, fa, fb, case, base, opts, secs, piles):
 
 
 def _limit_run(inc, pier, case, lam_max, base, opts, secs, piles, labels):
-    """単位荷重 case を荷重係数 0 → lam_max まで増やし、最初に限界に達する荷重係数を返す"""
+    """単位荷重 case（ケース名、または慣性力 (pattern, sign)）を荷重係数 0 → lam_max まで増やし、
+    最初に限界に達する荷重係数を返す"""
+    load = dict(cases=[case]) if isinstance(case, str) else dict(pattern=case[0], sign=case[1])
+    name = case if isinstance(case, str) else "余震"
+    mcase = case if isinstance(case, str) else None
     res = inc.res
     lam, la = 0.0, 0.0
     fa = {e: f.copy() for e, f in inc.face.items()}
@@ -216,7 +242,7 @@ def _limit_run(inc, pier, case, lam_max, base, opts, secs, piles, labels):
         s0 = inc.step
         th0 = {k: h.theta for k, h in inc.hinges.items()}
         try:
-            inc.run(f"利用 {case}", cases=[case], lam_target=min(chunk, lam_max - lam), checks=False)
+            inc.run(f"利用 {name}", lam_target=min(chunk, lam_max - lam), checks=False, **load)
         except RuntimeError:                                  # 不安定（機構）: その時点までで打ち切り
             return la, "構造が不安定", ""
         prev_th = th0
@@ -236,7 +262,7 @@ def _limit_run(inc, pier, case, lam_max, base, opts, secs, piles, labels):
                         return la, "局部座屈した杭の塑性化", labels[hit[0]]
                     if evs:
                         return lb, "杭の局部座屈", evs[0]["label"]
-            b = _check_segment(pier, la, lb, fa, fb, case, base, opts, secs, piles)
+            b = _check_segment(pier, la, lb, fa, fb, mcase, base, opts, secs, piles)
             if b:
                 return b
             la, fa, prev_th = lb, fb, th
@@ -258,7 +284,7 @@ def allowable_loads(pier, fr, opts):
             inc.run(f"除去 {c}", cases=[c], sign=-1.0, lam_target=1.0, checks=False)
         base = {c: 1.0 for c in fr.gravity if c not in removed}
         snap = inc.snapshot()
-        cases = _unit_cases(pier, opts)
+        cases = _unit_cases(pier, opts, fr)
         secs = deck_sections(pier, opts.get("rebar_loss")) if opts["deck_mu"] else []
         piles = []
         if opts["pile_axial"]:
@@ -284,8 +310,9 @@ def allowable_loads(pier, fr, opts):
             e.springs = None
         for items in cases.values():
             for case, _ in items:
-                m.member_loads.pop(case, None)
-                m.nodal_loads.pop(case, None)
+                if isinstance(case, str):
+                    m.member_loads.pop(case, None)
+                    m.nodal_loads.pop(case, None)
         inc.restore(snap0)
     return out
 
@@ -346,7 +373,11 @@ def judge(row, opts):
         a = row.get(f"allow_{k}")
         if a is None:
             continue
-        if a <= 0:
+        if k == "aftershock":                    # 余震時の条件（表 D-5）: 既定は不足すれば利用不可
+            if a < req:
+                up(code[lim.get("aftershock", "unusable")],
+                   f"余震（L1 相当）に対する余裕の不足: 許容 {load_text(k, a)} < 想定 {load_text(k, req)}")
+        elif a <= 0:
             up(2, f"{LOAD_NAME[k]}を載せられない")
         elif a < req:
             up(1, f"{LOAD_NAME[k]}の許容値 {a:g} {LOAD_UNIT[k]} < 必要な値 {req:g}")
@@ -428,7 +459,7 @@ def print_summary(s, opts):
     for k, (p, se) in s["status"].items():
         print(f"  {k:<8} {p:6.1%}（標準誤差 {se:.1%}）")
     for k, (p, se) in s["allow"].items():
-        print(f"  {LOAD_NAME[k]}の許容値 < 必要な値 {opts['required'][k]:g} {LOAD_UNIT[k]}: {p:6.1%}（標準誤差 {se:.1%}）")
+        print(f"  {LOAD_NAME[k]}の許容値 < 必要な値 {load_text(k, opts['required'][k])}: {p:6.1%}（標準誤差 {se:.1%}）")
     for k, f in s["fragility"].items():
         print(f"  フラジリティ（{k}）: " + ("推定できません（全て同じ判定）" if f is None else
                                           f"中央値 {f[0]:.3f} m、対数標準偏差 {f[1]:.3f}"))

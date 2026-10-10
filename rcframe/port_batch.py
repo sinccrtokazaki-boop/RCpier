@@ -55,8 +55,8 @@ COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
            "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_buckled_head", "n_plastic", "max_strain",
            "perforation", "deck_mu_max", "deck_mu_res", "pile_axial_max", "pile_m_res",
-           "soil_yield", "wall_move", "bridge_rel", "apron_step", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
-           "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds", "det"]
+           "soil_yield", "wall_move", "bridge_rel", "apron_step", "allow_surcharge", "allow_berthing", "allow_tractive", "allow_aftershock",
+           "status", "reasons", "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "allow_aftershock_by", "refine_reason", "seconds", "det"]
 DISTS = ("lognormal", "normal", "uniform", "choice")
 
 

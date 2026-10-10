@@ -518,6 +518,7 @@ scenarios:
 ```yaml
 usability:
   required: {surcharge: 10, berthing: 500, tractive: 500}   # 利用に必要な荷重 [kN/m², kN, kN]
+  # required.aftershock: 0.15       # 余震として想定する L1 の照査用震度（G2、指定すると許容震度を求める）
   remove: [Ls]                      # 地震時の上載荷重は利用時の荷重に置き換える（既定）
   limits:                           # 判定基準（計算例は仮の値）
     residual_displacement: {limited: 0.1, unusable: 0.3}    # 上部工の残留水平変位 [m]
@@ -710,6 +711,18 @@ G1 済: 本震時の記録（port_flow.FlowResult の deck_ratio・pile_axial_ra
   長期だけの軸力比 = 線形解析の長期の軸力 / Rcd、残留 |M|/My = ヒンジの値、判定の設定と入力の誤り、一括実行の列
 - 川崎（L1）の計算し直し: 0 年で仮の閾値により制限付き・不可だった 42 件のうち 9 件は本震時に梁が Mu を超える
   （M/Mu 最大 1.44）。60 年の局部座屈 48 件のうち 36 件は杭頭だけ
+
+G2 済: 余震の照査（port_usability の許容荷重に 4 つめの種類 aftershock）
+- 本震後の状態（Ls を除いた後）から、上部工の重心に kh·W（地震用重量、port_level2.inertia_pattern）を本震と同じ向き・
+  逆向きに漸増し、杭の塑性化（allowable.pile）・梁の Mu・杭の支持力に最初に達する kh を許容値 allow_aftershock とする
+  （小さい方、allow_aftershock_by に限界と向き）。許容荷重と同じ事象追跡・線形補間
+- required.aftershock（L1 の照査用震度）を指定すると計算し、許容値が下回れば limits.aftershock（既定 unusable、表 D-5 は
+  全フェーズで余震時に降伏以下）
+- 静的な扱い（ガイドライン 3.5）。余震による地盤変位の増加・液状化は扱わない。梁の限界は Mu（材料係数 1.0）
+- テスト（tests/test_aftershock.py）: 弾性範囲の許容震度（杭の降伏・梁の Mu）= 両向きの線形解析の重ね合わせ、
+  被災で許容震度が下がり本震と同じ向きで決まる、算定後に状態が戻る、判定と入力
+- 川崎（L1、kh = 0.15 を想定）の試算: 損傷のない状態で 0.20〜0.25（梁 L–C2 の Mu で決まる）、残留 0.15 m で 0.16、
+  60 年の抽出に 0.023 のもの
 
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。

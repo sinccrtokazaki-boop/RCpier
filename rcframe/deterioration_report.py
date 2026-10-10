@@ -23,7 +23,7 @@ import yaml
 from . import pier_chain, svg
 from .chain_draw import code_str, full_svg
 from .port_cards import CARD_CSS, STATUS_CLS
-from .port_usability import LOAD_NAME, LOAD_UNIT, RETAIN_LIMITS, STATUS, final_rows, fit_fragility, judge, read_usability
+from .port_usability import LOAD_NAME, RETAIN_LIMITS, STATUS, final_rows, fit_fragility, judge, load_text, read_usability
 from .report import Raw, assemble_html, figure, table
 
 BLOCK_SCENARIO = {"chloride": "S1", "chloride_top": "S1", "pile": "S2", "scour": "S4"}
@@ -32,7 +32,7 @@ SC_NAME = {s[0]: s[1] for s in pier_chain.SCENARIOS}
 CATS = [("上部工の残留変位", "上部工の残留変位"), ("杭の残留の塑性回転角", "杭の回転角"), ("杭の局部座屈", "杭の局部座屈"),
         ("杭の塑性化", "杭の塑性化"), ("渡版の開き", "渡版の開き"), ("土留部が上部工", "土留部が寄る"),
         ("段差", "背後の段差"), ("上載荷重", "上載荷重の不足"), ("接岸力", "接岸力の不足"), ("牽引力", "牽引力の不足"),
-        ("上部工の梁が Mu", "本震時の上部工の Mu"), ("杭の軸力が設計支持力", "本震時の杭の軸力")]
+        ("上部工の梁が Mu", "本震時の上部工の Mu"), ("杭の軸力が設計支持力", "本震時の杭の軸力"), ("余震", "余震に対する余裕")]
 DET_KEYS = [("rebar_loss_bottom", "梁の下端筋の断面欠損率", "{:.1%}"), ("corrosion_head", "杭頭側の腐食量 [mm]", "{:.2f}"),
             ("corrosion_sea", "海中部の腐食量 [mm]", "{:.2f}"), ("corrosion_soil", "地中部の腐食量 [mm]", "{:.2f}"),
             ("scour", "洗掘深さ（海側の列）[m]", "{:.2f}")]
@@ -422,7 +422,7 @@ def sec_method(study, ctx):
             trs.append([cc["level"], "杭の残留の塑性回転角", f"{lim['pile_rotation'][0]:g} rad 以上", f"{lim['pile_rotation'][1]:g} rad 以上"])
         trs.append([cc["level"], "杭の損傷", "塑性化", "局部座屈"])
         trs.append([cc["level"], "許容荷重（必要な値: " + "、".join(
-            f"{LOAD_NAME[k]} {v:g} {LOAD_UNIT[k]}" for k, v in cc["opts"]["required"].items()) + "）",
+            f"{LOAD_NAME[k]} {load_text(k, v)}" for k, v in cc["opts"]["required"].items()) + "）",
             "必要な値を下回る", "0（載せられない）"])
     out.append(table(["", "項目", "制限付き利用", "利用不可"], trs))
     out.append('<p class="note">いずれも仮の値。許容荷重は、被災状態（常時は長期荷重の状態）から単位荷重を増やし、杭の塑性回転の'

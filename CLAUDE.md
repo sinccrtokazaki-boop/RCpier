@@ -96,7 +96,8 @@ D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、
 
 ## ガイドライン（港湾施設の利用可否判断に係るガイドライン 第2版、令和8年5月）に合わせる変更（README.md 参照、各段階はユーザー承認後に着手）
 G1 済: 本震時の記録（FlowResult.deck_ratio・pile_axial_ratio・residual_moment_ratio、列 deck_mu_max/res・pile_axial_max・pile_m_res・n_buckled_head、
-limits.deck_mu・pile_axial・pile_damage.杭頭の局部座屈）→ G2: 余震の照査（本震後に L1 の震度を漸増）→ G3: 利用方法ごとの判定（表 D-5、
+limits.deck_mu・pile_axial・pile_damage.杭頭の局部座屈）→ G2 済: 余震の照査（許容荷重の種類 aftershock: 本震後に kh·W を両向きに漸増、
+required.aftershock・limits.aftershock、列 allow_aftershock）→ G3: 利用方法ごとの判定（表 D-5、
 区分 利用可／利用可（注意事項あり）／利用不可）→ G4: 再計算と報告書（図 D-8・D-9 相当、残留水平変位の閾値、表 A-1 の目安との比較）
 
 ## 既知の簡略化
@@ -117,6 +118,7 @@ limits.deck_mu・pile_axial・pile_damage.杭頭の局部座屈）→ G2: 余震
 - ファイバーのヒンジ: My〜Mu を直線（θu = (φu − φy)·Lp）、局部座屈後の耐力低下なし、軸力は長期で固定（0.5%Ny 刻み）
 - 照合が必要（U3）: fiber.VERIFY_ITEMS（εcu の式A・式B）
 - 利用可否（U5）: 判定基準・必要な荷重は入力（計算例は仮の値、port_usability.VERIFY_ITEMS）。利用時の地盤ばねは地震時と同じ
+- 余震（G2）: 静的に L1 の震度の慣性力を漸増（地盤変位の増加・液状化なし）。梁の限界は Mu（材料係数 1.0）
 - 劣化（D1・D2）: 梁の主筋の欠損は全ての梁に一律で Mu だけに効く。鉄筋は一様腐食（孔食・ひび割れによる加速なし）。
   杭の腐食は 3 部位（杭頭側・海中部・地中部）ごとに一律で、剛性は変えない。分布の値は基準類の標準値と仮定
 - 土留部と渡版（D3）: 土留部はモデル化せず、移動 = 比 × 地盤変位、沈下 = 比 × 移動（または値）の後処理。相互作用なし
