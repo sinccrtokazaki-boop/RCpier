@@ -43,6 +43,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - Element.prepare は形状（_geom_key）と断面・ばね（_prep_key）を分けてキャッシュし、変わった部分だけ再計算する
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
 - `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
+- `rcframe/port_deterioration.py`: 劣化のモデル（Fick の塩化物イオン → 鉄筋の断面欠損、杭の防食の寿命と腐食速度）。scenarios.deterioration
 - `rcframe/port_usability.py`: 利用可否の判定（judge）・許容荷重（allowable_loads）・超過確率（probability_summary）
 - `rcframe/pier_chain.py`: RC 桟橋の変状連鎖のデータ（ノード・矢印・重点シナリオ）。作図は `rcframe/chain_draw.py`、`python docs/make_henjo_rensa.py`
   - 出典は港空研資料 No.1328（図-3.4・図-4.1・表-3.1・表-4.1）。ノード・矢印・点検の番号は文献に合わせる（tests の test_matches_reference_figure）
@@ -89,7 +90,7 @@ U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位�
 → U4 済: 一括実行（2段階）→ U5 済: 判定・許容荷重・超過確率 → U6 済: 判定カード（HTML）
 
 ## 変状連鎖の重点シナリオの確率評価（README.md 参照、各段階はユーザー承認後に着手）
-D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、洗掘）→ D2: 劣化のモデル（年数・確率分布）
+D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、洗掘）→ D2 済: 劣化のモデル（port_deterioration.py、scenarios.deterioration）
 → D3: 土留部・渡版の判定（後処理）→ D4: 川崎港の計算（40・60 年 × 常時・L1・L2）→ D5: 報告
 
 ## 既知の簡略化
@@ -110,3 +111,5 @@ D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、
 - ファイバーのヒンジ: My〜Mu を直線（θu = (φu − φy)·Lp）、局部座屈後の耐力低下なし、軸力は長期で固定（0.5%Ny 刻み）
 - 照合が必要（U3）: fiber.VERIFY_ITEMS（εcu の式A・式B）
 - 利用可否（U5）: 判定基準・必要な荷重は入力（計算例は仮の値、port_usability.VERIFY_ITEMS）。利用時の地盤ばねは地震時と同じ
+- 劣化（D1・D2）: 梁の主筋の欠損は全ての梁に一律で Mu だけに効く。鉄筋は一様腐食（孔食・ひび割れによる加速なし）。
+  杭の腐食は 3 部位（杭頭側・海中部・地中部）ごとに一律で、剛性は変えない。分布の値は基準類の標準値と仮定

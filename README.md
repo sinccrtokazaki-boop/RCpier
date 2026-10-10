@@ -605,7 +605,7 @@ python docs/make_henjo_rensa.py [公開ページ用 HTML]    # → docs/変状�
 計算している箇所
 
 **変状連鎖の重点シナリオの確率評価（D1〜D5、各段階はユーザー承認後に着手）**
-D1 済: 劣化の変数 → D2: 劣化のモデル（年数・確率分布）→ D3: 土留部・渡版の判定 → D4: 川崎港の計算 → D5: 報告
+D1 済: 劣化の変数 → D2 済: 劣化のモデル（年数・確率分布）→ D3: 土留部・渡版の判定 → D4: 川崎港の計算 → D5: 報告
 ```yaml
 scenarios:                          # 劣化の変数（grid・base・distributions に書ける）
   base:
@@ -623,6 +623,33 @@ scenarios:                          # 劣化の変数（grid・base・distributi
 - 洗掘は海底面（piles.rows.*.seabed）を下げた入力で Pier を作り直す（自由長が増え、上の層が薄くなる）
 - テスト（tests/test_deterioration.py）: 下端筋の欠損で Mu = 手計算 As·fy·(d − a/2)、部位ごとのヒンジ = 一様な腐食の
   断面のヒンジ・手計算 Mp(N)、洗掘で自由長が増える、一括実行で洗掘により変位が増え欠損により許容荷重が下がる
+
+D2 済: 劣化のモデル（rcframe/port_deterioration.py）。確率分布から供用年数ごとに上の変数を作る
+```yaml
+scenarios:
+  deterioration:
+    age: [40, 60]                   # 供用年数 [年]。同じ抽出値で年数ごとのシナリオを作る
+    chloride:                       # 上部工の塩害 → rebar_loss_bottom（chloride_top → rebar_loss_top）
+      C0: {lognormal: {median: 13.0, beta: 0.3}}     # 表面塩化物イオン濃度 [kg/m³]
+      D: {lognormal: {median: 1.0, beta: 0.5}}       # 見かけの拡散係数 [cm²/年]
+      cover: {normal: {mean: 100, sd: 10}}           # かぶり [mm]（鉄筋の表面まで）
+      Clim: {lognormal: {median: 1.6, beta: 0.25}}   # 腐食発生限界濃度 [kg/m³]
+      icorr: {lognormal: {median: 2.0, beta: 0.7}}   # 腐食電流密度 [μA/cm²]
+      bar: 22                                        # 鉄筋の径 [mm]
+    pile:                           # 杭の防食と腐食 → corrosion_head / sea / soil
+      boundary: -1.0
+      head: {life: {lognormal: {median: 30, beta: 0.5}}, rate: {lognormal: {median: 0.2, beta: 0.4}}}
+      sea:  {life: {lognormal: {median: 30, beta: 0.5}}, rate: {lognormal: {median: 0.15, beta: 0.4}}, factor: 0.1}
+      soil: {rate: {uniform: [0.02, 0.04]}}
+  distributions: {...}              # 地震の変数（同時に抽出。抽出値は deterioration の有無で変わらない）
+  sample: 200
+```
+- 塩化物イオン: C(x, t) = Ci + (C0 − Ci)·erfc(x/(2√(Dt)))。腐食の開始 t_i = x²/(4D·z²)、z = erfc⁻¹((Clim − Ci)/(C0 − Ci))
+- 鉄筋の腐食（一様）: 半径の減少 0.0116·icorr·(t − t_i) [mm]、欠損率 1 − ((φ − 2Δr)/φ)²（孔食・ひび割れによる加速なし）
+- 杭: 腐食量 = rate·(factor·min(t, life) + max(t − life, 0))（寿命までは防食、その後は腐食速度 rate）
+- 結果の列: age、t_init（腐食の開始）、det（抽出値と途中の値の JSON）
+- テスト（tests/test_deterioration_model.py）: erfc(1) で t_i = x²/(4D)、t_i で濃度 = Clim、かぶり・D への比例、
+  欠損率・腐食量の手計算、年数どうしで抽出値が同じ、地震の抽出値が変わらない、抽出の統計量
 
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。

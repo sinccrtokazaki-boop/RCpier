@@ -13,6 +13,8 @@
         corrosion_head / sea / soil        : 杭の外面の腐食量 [mm]（杭頭側・海中部・地中部）→ ヒンジの Mp・M–φ
         corrosion_boundary                 : 杭頭側の下端の標高 [m]（既定 −1.0 = L.W.L. − 1 m、L.W.L. ±0）
         scour（+ scour_ratio）             : 洗掘による海底面の低下 [m]（列ごと、またはスカラー × 列ごとの比）
+    劣化のモデル（scenarios.deterioration、port_deterioration）: 確率分布から供用年数ごとに上の変数を作る。
+        地震の変数（distributions）と同時に抽出でき、地震の抽出値は deterioration の有無で変わらない（別の乱数系列）
 
 使い方: python -m rcframe.port_batch 入力.yaml -o 出力の名前（.jsonl と .csv）[-j 並列数]
         [--cards フォルダ [--cards-all]]（判定カードと一覧 index.html、port_cards）
@@ -37,6 +39,7 @@ import numpy as np
 import yaml
 
 from .grid import InputError, _check_keys, _num
+from . import port_deterioration as det_model
 from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
 from .port_usability import judge, usability_row
 
@@ -45,11 +48,11 @@ DET_KEYS = ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_
             "corrosion_boundary", "scour", "scour_ratio")
 PARAMS = FLOW_KEYS + ("ecu", "surface_ratio") + DET_KEYS      # シナリオの変数（grid・base に書ける）
 COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
-           "rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil", "scour",
+           "age", "t_init", "rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil", "scour",
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
            "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain", "perforation",
            "soil_yield", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
-           "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds"]
+           "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds", "det"]
 DISTS = ("lognormal", "normal", "uniform", "choice")
 
 
@@ -58,7 +61,7 @@ def read_scenarios(d):
     """scenarios の設定を読む。戻り値: dict(base, grid, sample, seed, screening, refine, workers)"""
     if not d:
         raise InputError("scenarios がありません")
-    _check_keys(d, ("base", "grid", "distributions", "sample", "seed", "screening", "refine", "workers"),
+    _check_keys(d, ("base", "grid", "distributions", "deterioration", "sample", "seed", "screening", "refine", "workers"),
                 "scenarios")
     base = dict(d.get("base") or {})
     grid = dict(d.get("grid") or {})
@@ -78,6 +81,17 @@ def read_scenarios(d):
             raise InputError("scenarios.distributions には sample（抽出する数）が必要です")
         for k, v in dists.items():
             _read_dist(v, f"scenarios.distributions.{k}")
+    det = det_model.read_models(d.get("deterioration"))
+    if det:
+        if grid:
+            raise InputError("scenarios: grid と deterioration は同時に使えません（deterioration は sample 個を抽出）")
+        if sample is None:
+            raise InputError("scenarios.deterioration には sample（抽出する数）が必要です")
+        made = (["rebar_loss_bottom"] if det["chloride"] else []) + (["rebar_loss_top"] if det["chloride_top"] else []) + \
+            ([f"corrosion_{z}" for z in det["pile"]] + ["corrosion_boundary"] if det["pile"] else [])
+        dup = sorted(k for k in made if k in base or k in dists)
+        if dup:
+            raise InputError(f"scenarios: {dup} は deterioration から作るので base・distributions に書けません")
     scr = dict(d.get("screening") or {})
     _check_keys(scr, ("segment",), "scenarios.screening")
     ref = d.get("refine", {"when": {"pile_yield": True}})
@@ -91,7 +105,7 @@ def read_scenarios(d):
             lo, hi = (_num(x, "scenarios.refine.when.residual") for x in when["residual"])
             if not 0 <= lo < hi:
                 raise InputError("scenarios.refine.when.residual: [下限, 上限]（m、下限 < 上限）です")
-    return dict(base=base, grid=grid, dists=dists, sample=sample, seed=int(d.get("seed", 1)),
+    return dict(base=base, grid=grid, dists=dists, det=det, sample=sample, seed=int(d.get("seed", 1)),
                 screening=dict(segment=_num(scr.get("segment", 1.0), "scenarios.screening.segment")),
                 refine=dict(when=when, segment=ref.get("segment")),
                 workers=int(d.get("workers", 1)))
@@ -139,6 +153,15 @@ def _draw(rng, v):
 def scenario_params(cfg):
     """シナリオの変数の [dict]。各 dict は base に grid の組合せ（sample があれば無作為に抽出）、
     または distributions から抽出した値（sample 個、seed で再現）を重ねたもの"""
+    if cfg.get("det"):                                   # 劣化のモデル: 抽出 1 組ごとに年数の数だけシナリオ
+        rng = np.random.default_rng(cfg["seed"])
+        rng_det = np.random.default_rng([cfg["seed"], 2])
+        keys = sorted(cfg.get("dists") or {})
+        out = []
+        for _ in range(cfg["sample"]):
+            seismic = {k: _draw(rng, cfg["dists"][k]) for k in keys}
+            out += det_model.scenario_params(cfg["det"], cfg["base"], seismic, rng_det)
+        return out
     if cfg.get("dists"):
         rng = np.random.default_rng(cfg["seed"])
         keys = sorted(cfg["dists"])
@@ -216,7 +239,7 @@ def apply_scour(data, scour):
 def to_flow_case(pier, params, name):
     """シナリオの変数（YAML の単位）を FlowCase と ecu の設定に変換する（劣化の変数は除く）。
     surface がスカラーで surface_ratio（列ごとの比）があれば、列ごとの値 = surface × 比"""
-    p = {k: v for k, v in params.items() if k not in DET_KEYS}
+    p = {k: v for k, v in params.items() if k not in DET_KEYS and k != "age" and not k.startswith("_")}
     ecu = p.pop("ecu", "A")
     ratio = p.pop("surface_ratio", None)
     if ratio is not None and not isinstance(p.get("surface"), dict):
@@ -264,6 +287,7 @@ def _summary(r, sid, tier, params, seconds):
         "depth": c.depth / M if c.bottom is None else None, "bottom": None if c.bottom is None else c.bottom / M,
         "shape": c.shape, "kh_factor": c.kh_factor, "pu_factor": c.pu_factor,
         "kh": c.kh, "order": c.order, "ecu": str(params.get("ecu", "A")),
+        "age": params.get("age"), "t_init": (params.get("_det") or {}).get("chloride.t_init"),
         **{k: params.get(k) for k in ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea",
                                       "corrosion_soil")},
         "scour": sc if not isinstance(sc, dict) else json.dumps(sc, ensure_ascii=False),
@@ -276,6 +300,7 @@ def _summary(r, sid, tier, params, seconds):
         "perforation": any("開孔" in w for w in r.warnings),
         "soil_yield": sum(s.yielded for s in r.soil.values()), "refine_reason": "",
         "seconds": round(seconds, 2),
+        "det": json.dumps(params["_det"], ensure_ascii=False) if params.get("_det") else None,
     }
 
 
