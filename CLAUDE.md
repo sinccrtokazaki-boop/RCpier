@@ -43,6 +43,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - Element.prepare は形状（_geom_key）と断面・ばね（_prep_key）を分けてキャッシュし、変わった部分だけ再計算する
 - 桟橋の杭の要素キー: ("p", i, j) = 自由長部（杭頭側）、("pg", i, j, k) = 地中部の分割（地盤ばねモデル）
 - `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
+- `rcframe/deterioration_report.py`: 変状連鎖の重点シナリオの確率評価の報告書（結果のフォルダ → HTML、report.assemble_html）
 - `rcframe/port_deterioration.py`: 劣化のモデル（Fick の塩化物イオン → 鉄筋の断面欠損、杭の防食の寿命と腐食速度）。scenarios.deterioration
 - `rcframe/port_usability.py`: 利用可否の判定（judge）・許容荷重（allowable_loads）・超過確率（probability_summary）
 - `rcframe/pier_chain.py`: RC 桟橋の変状連鎖のデータ（ノード・矢印・重点シナリオ）。作図は `rcframe/chain_draw.py`、`python docs/make_henjo_rensa.py`
@@ -91,7 +92,7 @@ U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位�
 
 ## 変状連鎖の重点シナリオの確率評価（README.md 参照、各段階はユーザー承認後に着手）
 D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、洗掘）→ D2 済: 劣化のモデル（port_deterioration.py、scenarios.deterioration）
-→ D3 済: 土留部・渡版の判定（後処理、usability.retaining・limits.bridge_opening/apron_step）→ D4 済: 川崎港の計算（examples/kawasaki_deterioration.py）→ D5: 報告
+→ D3 済: 土留部・渡版の判定（後処理、usability.retaining・limits.bridge_opening/apron_step）→ D4 済: 川崎港の計算（examples/kawasaki_deterioration.py）→ D5 済: 報告書（deterioration_report.py）
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用

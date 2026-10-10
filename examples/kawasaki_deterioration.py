@@ -5,7 +5,8 @@
 
 構造・地盤（仮定を含む）は examples/kawasaki_probability_L1.yaml。これに劣化のモデル（scenarios.deterioration）と
 地震・土留部の確率分布を加えたケースを作り、kawasaki_deterioration/inputs/ に YAML を書いて一括実行する。
-結果は kawasaki_deterioration/results/<ケース>.jsonl・.csv（再実行すると計算済みを飛ばす）、集計は summary.json。
+結果は kawasaki_deterioration/results/<ケース>.jsonl・.csv（再実行すると計算済みを飛ばす）、集計は summary.json、
+報告書は 報告書.html（rcframe/deterioration_report.py）。
 
 ケース（各 200 回の抽出。劣化の抽出値は項目ごとに共通、地震の抽出値は L1・L2 の中で共通）:
     normal_S1 / S2 / S4 / all : 常時（地震なし）。S1 塩害、S2 杭の防食工と腐食、S4 洗掘、all はその全部。供用 40・60 年
@@ -25,6 +26,7 @@ import yaml
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
+from rcframe.deterioration_report import write_deterioration_report  # noqa: E402
 from rcframe.port_batch import Batch  # noqa: E402
 from rcframe.port_usability import STATUS, final_rows  # noqa: E402
 
@@ -145,6 +147,7 @@ def main(argv=None):
         for age, s in summary[name].items():
             print(f"  {age} 年: " + "、".join(f"{k} {v:.1%}" for k, v in s["p"].items())
                   + f"（{s['n']} 件、{time.time() - t0:.0f} 秒）", flush=True)
+    print("報告書 →", write_deterioration_report(OUT, OUT / "報告書.html"))
 
 
 if __name__ == "__main__":
