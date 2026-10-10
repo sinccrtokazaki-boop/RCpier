@@ -41,17 +41,17 @@ import yaml
 from .grid import InputError, _check_keys, _num
 from . import port_deterioration as det_model
 from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
-from .port_usability import judge, usability_row
+from .port_usability import RETAIN_KEYS, judge, read_retaining, retaining_row, usability_row
 
 M = 1e3
 DET_KEYS = ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil",
             "corrosion_boundary", "scour", "scour_ratio")
-PARAMS = FLOW_KEYS + ("ecu", "surface_ratio") + DET_KEYS      # シナリオの変数（grid・base に書ける）
+PARAMS = FLOW_KEYS + ("ecu", "surface_ratio") + DET_KEYS + RETAIN_KEYS     # シナリオの変数（grid・base に書ける）
 COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
-           "age", "t_init", "rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil", "scour",
+           "age", "t_init", "rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil", "scour", "wall_ratio",
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
            "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain", "perforation",
-           "soil_yield", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
+           "soil_yield", "wall_move", "bridge_rel", "apron_step", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
            "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds", "det"]
 DISTS = ("lognormal", "normal", "uniform", "choice")
 
@@ -239,7 +239,8 @@ def apply_scour(data, scour):
 def to_flow_case(pier, params, name):
     """シナリオの変数（YAML の単位）を FlowCase と ecu の設定に変換する（劣化の変数は除く）。
     surface がスカラーで surface_ratio（列ごとの比）があれば、列ごとの値 = surface × 比"""
-    p = {k: v for k, v in params.items() if k not in DET_KEYS and k != "age" and not k.startswith("_")}
+    p = {k: v for k, v in params.items()
+         if k not in DET_KEYS and k not in RETAIN_KEYS and k != "age" and not k.startswith("_")}
     ecu = p.pop("ecu", "A")
     ratio = p.pop("surface_ratio", None)
     if ratio is not None and not isinstance(p.get("surface"), dict):
@@ -291,6 +292,7 @@ def _summary(r, sid, tier, params, seconds):
         **{k: params.get(k) for k in ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea",
                                       "corrosion_soil")},
         "scour": sc if not isinstance(sc, dict) else json.dumps(sc, ensure_ascii=False),
+        "wall_ratio": params.get("wall_ratio"),
         "reached": r.reached, "deck_peak": r.deck["peak"] / M, "deck_residual": r.deck["residual"] / M,
         "deck_rot": r.deck["rot_residual"], "head_rot_max": head[0], "head_rot_res": head_r[0],
         "inground_rot_max": ing[0], "inground_rot_res": ing_r[0], "n_yield": len(r.yielded),
@@ -334,15 +336,24 @@ def usability_opts(pier, params):
     return {**pier.usability, "rebar_loss": det["rebar_loss"]}
 
 
+def usability_eval(pier, r, params):
+    """許容荷重・土留部と渡版の値・判定を結果の行の列にする（pier.usability がなければ {}）"""
+    if not pier.usability:
+        return {}
+    opts = usability_opts(pier, params)
+    row = usability_row(pier, r, opts)
+    row.update(retaining_row(pier, r, opts, params))
+    return row
+
+
 def run_one(data, sid, params, tier, segments):
     """1シナリオの計算と結果の行（usability があれば許容荷重と判定を含む）"""
     t0 = time.time()
     pier, r = analyze(data, sid, params, tier, segments)
     row = _summary(r, sid, tier, params, time.time() - t0)
-    if pier.usability:                                   # 許容荷重と判定（U5）
-        opts = usability_opts(pier, params)
-        row.update(usability_row(pier, r, opts))
-        row["status"], reasons = judge(row, opts)
+    if pier.usability:                                   # 許容荷重と判定（U5）、土留部と渡版（D3）
+        row.update(usability_eval(pier, r, params))
+        row["status"], reasons = judge(row, usability_opts(pier, params))
         row["reasons"] = " / ".join(reasons)
         row["seconds"] = round(time.time() - t0, 2)
     return row
@@ -393,6 +404,7 @@ class Batch:
             det = read_deterioration(params, row_names(data))
             if det["scour"]:
                 apply_scour(data, det["scour"])
+            read_retaining(params)
             self.scenarios.append((sid, params))
         seg = self.cfg["refine"]["segment"]
         self.segments = {"screen": self.cfg["screening"]["segment"],

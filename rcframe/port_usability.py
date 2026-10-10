@@ -12,6 +12,11 @@
     ケース（既定 Ls）は利用時の荷重に置き換えるため、先に取り除く
 判定（usability.limits）: 上部工の残留変位、杭の残留の塑性回転角、杭の損傷の程度、許容荷重と必要な荷重
     から「利用可 / 制限付き利用 / 利用不可」を決め、最も厳しいものをとる
+土留部と渡版（後処理、変状連鎖の重点シナリオ D3。土留部はモデル化しない）:
+    土留部の海側への移動 δw = wall_ratio × 土留部の列（usability.retaining.row、既定は海底面の最も高い列）の
+    海底面の地盤変位。背後の沈下 s = settlement、または settlement_ratio × δw
+    渡版の開き Δ = 上部工の残留変位 − δw（正: 開く、負: 土留部が上部工に寄る）→ limits.bridge_opening / bridge_closing
+    段差 = s（杭で支える上部工は沈下しないとする）→ limits.apron_step
 超過確率: 一括実行（port_batch、scenarios.distributions で変数を確率分布から抽出）の結果の行から、
     判定ごとの確率、許容荷重が必要な荷重を下回る確率（標準誤差つき）、地盤変位に対する
     フラジリティ曲線 P = Φ(ln(x/θ)/β)（最尤法）
@@ -33,6 +38,8 @@ LOADS = ("surcharge", "berthing", "tractive")
 LOAD_NAME = {"surcharge": "上載荷重", "berthing": "接岸力", "tractive": "牽引力"}
 LOAD_UNIT = {"surcharge": "kN/m²", "berthing": "kN", "tractive": "kN"}
 STATUS = ("利用可", "制限付き利用", "利用不可")
+RETAIN_LIMITS = ("bridge_opening", "bridge_closing", "apron_step")     # 土留部と渡版の閾値 [m]
+RETAIN_KEYS = ("wall_ratio", "settlement", "settlement_ratio")           # シナリオの変数
 VERIFY_ITEMS = [
     "利用可否の判定基準（残留変位・杭の塑性回転角・損傷の程度の閾値）。計算例の値は仮の値",
     "許容荷重の限界（杭の塑性化・局部座屈、梁の Mu、杭の支持力）と、利用時の地盤ばねを地震時と同じとする扱い",
@@ -54,13 +61,14 @@ def read_usability(pier, d):
     """YAML の usability を読む（なければ None）"""
     if not d:
         return None
-    _check_keys(d, ("limits", "required", "allowable", "remove"), "usability")
+    _check_keys(d, ("limits", "required", "allowable", "remove", "retaining"), "usability")
     lim = d.get("limits") or {}
-    _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage"), "usability.limits")
+    _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage") + RETAIN_LIMITS, "usability.limits")
     limits = {}
-    if "residual_displacement" in lim:
-        lo, hi = _levels(lim["residual_displacement"], "usability.limits.residual_displacement")
-        limits["residual_displacement"] = (lo * M, hi * M)
+    for k in ("residual_displacement",) + RETAIN_LIMITS:          # 長さの閾値 [m] → [mm]
+        if k in lim:
+            lo, hi = _levels(lim[k], f"usability.limits.{k}")
+            limits[k] = (lo * M, hi * M)
     if "pile_rotation" in lim:
         limits["pile_rotation"] = _levels(lim["pile_rotation"], "usability.limits.pile_rotation")
     pd = lim.get("pile_damage", {"塑性化": "limited", "局部座屈": "unusable"})
@@ -101,9 +109,16 @@ def read_usability(pier, d):
             if not xa <= x <= xb:
                 raise InputError(f"usability.allowable.{what}: x = {x / M:g} m が上部工の範囲外です")
     remove = [str(c) for c in d.get("remove", ["Ls"])]
+    ret = d.get("retaining") or {}
+    _check_keys(ret, ("row",), "usability.retaining")
+    wall_row = None
+    if "row" in ret:
+        wall_row = str(ret["row"])
+        if pier is not None and (wall_row not in pier.iy or pier.iy[wall_row] not in pier.pile_rows):
+            raise InputError(f"usability.retaining.row: 杭の列ではありません: {wall_row!r}")
     return dict(limits=limits, required=required, pile=pile, deck_mu=bool(al.get("deck_mu", True)),
                 pile_axial=bool(al.get("pile_axial", True)), max=mx, loads=loads,
-                fenders=fenders, bollards=bollards, remove=remove)
+                fenders=fenders, bollards=bollards, remove=remove, wall_row=wall_row)
 
 
 # ============================================================ 許容荷重
@@ -287,6 +302,20 @@ def judge(row, opts):
     n_pl = row.get("n_plastic") if row.get("n_plastic") is not None else row.get("n_yield", 0)
     if n_pl:
         up(code[pd["塑性化"]], f"杭の塑性化 {n_pl} 箇所")
+    rel = row.get("bridge_rel")
+    if rel is not None:
+        if "bridge_opening" in lim and rel > 0:
+            lo, hi = lim["bridge_opening"]
+            v = rel * M
+            up(2 if v >= hi else 1 if v >= lo else 0, f"渡版の開き {rel:.3f} m（上部工 − 土留部）")
+        if "bridge_closing" in lim and rel < 0:
+            lo, hi = lim["bridge_closing"]
+            v = -rel * M
+            up(2 if v >= hi else 1 if v >= lo else 0, f"土留部が上部工に寄る {-rel:.3f} m")
+    if row.get("apron_step") is not None and "apron_step" in lim:
+        lo, hi = lim["apron_step"]
+        v = row["apron_step"] * M
+        up(2 if v >= hi else 1 if v >= lo else 0, f"土留部の背後の段差 {row['apron_step']:.3f} m")
     for k, req in opts["required"].items():
         a = row.get(f"allow_{k}")
         if a is None:
@@ -296,6 +325,27 @@ def judge(row, opts):
         elif a < req:
             up(1, f"{LOAD_NAME[k]}の許容値 {a:g} {LOAD_UNIT[k]} < 必要な値 {req:g}")
     return STATUS[lv], reasons
+
+
+def read_retaining(params):
+    """シナリオの変数のうち土留部の変数（RETAIN_KEYS）を読む。戻り値: (wall_ratio, settlement, settlement_ratio)"""
+    vals = {k: (None if params.get(k) is None else _num(params[k], k)) for k in RETAIN_KEYS}
+    if any(v is not None and v < 0 for v in vals.values()):
+        raise InputError("wall_ratio / settlement / settlement_ratio: 0 以上です")
+    if vals["settlement"] is not None and vals["settlement_ratio"] is not None:
+        raise InputError("settlement と settlement_ratio はどちらか一方です")
+    return vals["wall_ratio"], vals["settlement"], vals["settlement_ratio"]
+
+
+def retaining_row(pier, fr, opts, params):
+    """土留部と渡版の値 {wall_move, bridge_rel, apron_step} [m]（土留部の変数も閾値もなければ {}）"""
+    wr, st, sr = read_retaining(params)
+    if wr is None and st is None and sr is None and not any(k in opts["limits"] for k in RETAIN_LIMITS):
+        return {}
+    j = pier.iy[opts["wall_row"]] if opts.get("wall_row") else max(pier.pile_rows, key=lambda j: pier.pile_rows[j][0])
+    move = (wr or 0.0) * abs(fr.case.surface.get(j, 0.0)) / M
+    step = st if st is not None else (sr or 0.0) * move
+    return {"wall_move": move, "bridge_rel": fr.deck["residual"] / M - move, "apron_step": step}
 
 
 def usability_row(pier, fr, opts):

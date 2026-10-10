@@ -605,7 +605,7 @@ python docs/make_henjo_rensa.py [公開ページ用 HTML]    # → docs/変状�
 計算している箇所
 
 **変状連鎖の重点シナリオの確率評価（D1〜D5、各段階はユーザー承認後に着手）**
-D1 済: 劣化の変数 → D2 済: 劣化のモデル（年数・確率分布）→ D3: 土留部・渡版の判定 → D4: 川崎港の計算 → D5: 報告
+D1 済: 劣化の変数 → D2 済: 劣化のモデル（年数・確率分布）→ D3 済: 土留部・渡版の判定 → D4: 川崎港の計算 → D5: 報告
 ```yaml
 scenarios:                          # 劣化の変数（grid・base・distributions に書ける）
   base:
@@ -650,6 +650,24 @@ scenarios:
 - 結果の列: age、t_init（腐食の開始）、det（抽出値と途中の値の JSON）
 - テスト（tests/test_deterioration_model.py）: erfc(1) で t_i = x²/(4D)、t_i で濃度 = Clim、かぶり・D への比例、
   欠損率・腐食量の手計算、年数どうしで抽出値が同じ、地震の抽出値が変わらない、抽出の統計量
+
+D3 済: 土留部と渡版の判定（後処理。土留部はモデル化しない）
+```yaml
+usability:
+  retaining: {row: L}               # 土留部の移動に使う地盤変位の列（既定: 海底面の最も高い列）
+  limits:                           # 閾値 [m]（仮の値）
+    bridge_opening: {limited: 0.1, unusable: 0.2}    # 渡版の開き = 上部工の残留変位 − 土留部の移動（かかり代）
+    bridge_closing: {limited: 0.3, unusable: 0.5}    # 土留部が上部工に寄る量（省略可）
+    apron_step: {limited: 0.05, unusable: 0.2}       # 土留部の背後の段差（沈下）
+scenarios:
+  distributions:
+    wall_ratio: {uniform: [0.5, 1.5]}                # 土留部の移動 / 土留部の列の海底面の地盤変位
+    settlement_ratio: {uniform: [0.2, 0.6]}          # 背後の沈下 / 土留部の移動（または settlement [m]）
+```
+- 上部工は杭で支えるので沈下しないとし、段差 = 背後の沈下。土留部が上部工を押す相互作用は考えない
+- 結果の列: wall_move、bridge_rel、apron_step（判定カードにも表示）
+- テスト（tests/test_retaining.py）: 判定の境界、移動・開き・段差の手計算、土留部の列の指定、入力の誤り、
+  変数も閾値もなければ列を作らない
 
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。

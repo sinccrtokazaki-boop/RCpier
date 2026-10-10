@@ -61,6 +61,8 @@ COLUMN_DOC = {
     "corrosion_head": "杭頭側の外面の腐食量 [mm]", "corrosion_sea": "海中部の外面の腐食量 [mm]",
     "corrosion_soil": "地中部の外面の腐食量 [mm]", "scour": "洗掘による海底面の低下 [m]",
     "perforation": "腐食量が板厚に達したヒンジがある（開孔）",
+    "wall_ratio": "土留部の移動 / 土留部の列の海底面の地盤変位", "wall_move": "土留部の海側への移動 [m]（仮定）",
+    "bridge_rel": "渡版の開き = 上部工の残留変位 − 土留部の移動 [m]", "apron_step": "土留部の背後の段差（沈下）[m]",
     "reached": "打ち切り変位に達せず全段階を載荷できた",
     "deck_peak": "上部工の最大変位 [m]", "deck_residual": "上部工の残留変位 [m]（流動方向を正）",
     "deck_rot": "上部工の平面の残留回転 [rad]", "head_rot_max": "杭頭の塑性回転角の最大 [rad]",

@@ -185,6 +185,9 @@ def card_html(pier, row, fr, opts, params):
           ("局部座屈", "-" if row.get("n_buckled") is None else f"{row['n_buckled']} 箇所"),
           ("最大ひずみ（推定）", _fmt(row.get("max_strain"), "{:.5f}")),
           ("降伏した地盤ばね", f"{row['soil_yield']} 箇所")]
+    if row.get("bridge_rel") is not None:
+        kv += [("土留部の移動（仮定）", f"{row['wall_move']:.3f} m"), ("渡版の開き（上部工 − 土留部）", f"{row['bridge_rel']:.3f} m"),
+               ("土留部の背後の段差（仮定）", f"{row['apron_step']:.3f} m")]
     parts.append('<div class="kv">' + "".join(f"<div><span>{escape(a)}</span><b>{escape(b)}</b></div>" for a, b in kv)
                  + "</div>")
     if opts:
@@ -303,14 +306,13 @@ def index_html(name, rows, opts, cards):
 # ============================================================ 書き出し
 def card_one(data, sid, params, tier, segments, row):
     """シナリオを解析し直してカードの HTML を返す（子プロセスでも動く）。戻り値: (HTML, 解析し直した行)"""
-    from .port_batch import _summary, analyze, usability_opts
-    from .port_usability import judge, usability_row
+    from .port_batch import _summary, analyze, usability_eval, usability_opts
+    from .port_usability import judge
     pier, fr = analyze(data, sid, params, tier, segments)
     again = _summary(fr, sid, tier, params, 0.0)
     if pier.usability:
-        opts = usability_opts(pier, params)
-        again.update(usability_row(pier, fr, opts))
-        again["status"], rs = judge(again, opts)
+        again.update(usability_eval(pier, fr, params))
+        again["status"], rs = judge(again, usability_opts(pier, params))
         again["reasons"] = " / ".join(rs)
     return card_html(pier, {**row, **again}, fr, pier.usability, params), again
 
