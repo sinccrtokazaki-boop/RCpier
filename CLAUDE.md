@@ -45,6 +45,7 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - `rcframe/fiber.py`    : 鋼管のファイバー M–φ（PipeMPhi）と局部座屈ひずみ εcu（計算のみ）。port_level2.PileCapacity でヒンジに使う
 - `rcframe/port_usability.py`: 利用可否の判定（judge）・許容荷重（allowable_loads）・超過確率（probability_summary）
 - `rcframe/pier_chain.py`: RC 桟橋の変状連鎖のデータ（ノード・矢印・重点シナリオ）。作図は `rcframe/chain_draw.py`、`python docs/make_henjo_rensa.py`
+  - 出典は港空研資料 No.1328（図-3.4・図-4.1・表-3.1・表-4.1）。ノード・矢印・点検の番号は文献に合わせる（tests の test_matches_reference_figure）
 - `rcframe/usability_report.py`: 利用可否シナリオの検討報告書（HTML、report.assemble_html）。`port_batch --report 報告書.html`
 - `rcframe/port_cards.py`: 判定カードと一覧の HTML（write_cards、report.CSS と svg を使う）。`port_batch --cards フォルダ`
 - `rcframe/port_batch.py`: シナリオの一括実行（Batch、2段階、並列、JSON Lines で再開）。`python -m rcframe.port_batch 入力.yaml -j 4`

@@ -4,8 +4,12 @@
 道路橋の変状連鎖図（rc_fukugen/tailrisk/chain_draw.py）と同じ描き方で、データ（spec）を引数で受け取る。
 spec はモジュール（例: rcframe.pier_chain）で、次を持つ:
     NODES, EDGES, LANES, COLS, COL_SUB, KINDS, SCENARIOS, flat,
-    TITLE, STEM, CODE_PREFIX, CODES（点検の部位 → 内容）, CODE_NOTE, FLAGS（印 → (記号, 説明)）, EXTRA_FACTORS, PAGE
-配置: 帯 = 部位（LANES）、列 = 段階（COLS）。矢印 p：進展、t：引き金となる外力、c：連成
+    TITLE, STEM, CODE_PREFIX, CODES（点検の番号 → 内容）, CODE_NOTE, FLAGS（印 → (記号, 説明)）, EXTRA_FACTORS, PAGE
+次は省略できる（括弧内は省略時の値）:
+    EDGE_KINDS（p：進展, t：引き金となる外力, c：連成）, FACTOR_KINDS（act, env, des）, END_KINDS（acc）,
+    ROUND_KINDS（= FACTOR_KINDS）, BOLD_KINDS・BOLD_LABEL_KINDS（fail, acc）, COL_GROUPS（なし）,
+    CODE_FMT（2 桁の数字）, CODE_SEP（・）, CODE_HEAD（部位, 主な点検の内容）, SOURCE（なし）
+配置: 帯 = 部位（LANES）、列 = 段階（COLS）。
 """
 import html
 import json
@@ -18,8 +22,29 @@ W, PADX = 172, 9          # ノードの幅・左右の余白
 G = 46                    # 段の間隔
 GUT = 104                 # 左の帯の名前の幅
 HEAD = 62                 # 上の段の名前の高さ
+GROUP_H = 24              # 列のまとまりの見出しの高さ（COL_GROUPS があるとき）
 LH, FS, FS2 = 16.5, 12.5, 10.5
 LANE_PAD, NODE_GAP = 16, 11
+
+EDGE_KINDS = {"p": "進展", "t": "引き金となる外力", "c": "連成（互いに進め合う）"}
+# 矢印の描き方：色の名前（FIXED と CSS の変数）, 破線, 線の太さ
+EDGE_STYLE = {"p": ("edge", "", 1.3), "t": ("trig", "5 4", 1.3), "s": ("trig", "4 3", 1.4),
+              "c": ("cpl", "9 3 2 3", 1.8)}
+
+
+def _opt(spec):
+    """spec の省略できる設定."""
+    factor = tuple(getattr(spec, "FACTOR_KINDS", ("act", "env", "des")))
+    return dict(edge_kinds=getattr(spec, "EDGE_KINDS", EDGE_KINDS), factor=factor,
+                end=tuple(getattr(spec, "END_KINDS", ("acc",))),
+                round=tuple(getattr(spec, "ROUND_KINDS", factor)),
+                bold=tuple(getattr(spec, "BOLD_KINDS", ("fail", "acc"))),
+                bold_label=tuple(getattr(spec, "BOLD_LABEL_KINDS", ("fail", "acc"))),
+                groups=list(getattr(spec, "COL_GROUPS", [])))
+
+
+def head_h(spec):
+    return HEAD + (GROUP_H if getattr(spec, "COL_GROUPS", None) else 0)
 
 
 def wrap(text, limit=12.2):
@@ -48,9 +73,14 @@ def wrap(text, limit=12.2):
     return out
 
 
+def code_str(spec, c):
+    """点検の番号の表示（数値は CODE_FMT、文字はそのまま）"""
+    return getattr(spec, "CODE_FMT", "{:02d}").format(c) if isinstance(c, int) else str(c)
+
+
 def code_text(spec, codes):
-    """ノードの下に書く点検の表示（数値は 2 桁、文字はそのまま）"""
-    return spec.CODE_PREFIX + " " + "・".join(f"{c:02d}" if isinstance(c, int) else str(c) for c in codes)
+    """ノードの下に書く点検の表示"""
+    return spec.CODE_PREFIX + " " + getattr(spec, "CODE_SEP", "・").join(code_str(spec, c) for c in codes)
 
 
 def layout(spec):
@@ -60,7 +90,7 @@ def layout(spec):
         h = 9 + len(lines) * LH + (15 if codes else 0) + 8
         nodes[nid] = dict(id=nid, c=c, lane=lane, kind=kind, label=label, lines=lines, codes=codes, flags=flags,
                           desc=desc, h=h, w=W)
-    lane_top, y = [], HEAD
+    lane_top, y = [], head_h(spec)
     for L in range(len(spec.LANES)):
         stacks = []
         for c in range(len(spec.COLS)):
@@ -105,7 +135,68 @@ FIXED = dict(bg="#ffffff", laneA="#f4f6f3", laneB="#ffffff", ink="#1e2528", ink2
              act=("#fbe3d6", "#c0582e", "#1e2528"), env=("#dcefe9", "#2f7d6b", "#1e2528"),
              des=("#e7e4f4", "#5b4fa0", "#1e2528"), dmg=("#ffffff", "#8a9499", "#1e2528"),
              perf=("#fff3d1", "#a87b12", "#1e2528"), fail=("#f8dcd9", "#a33a2e", "#1e2528"),
-             acc=("#2b3034", "#2b3034", "#ffffff"), fk="#2c5a78", lc="#8a4b14", rc="#2e6b3f")
+             acc=("#2b3034", "#2b3034", "#ffffff"),
+             ins=("#dde2e4", "#6b767b", "#1e2528"), non=("#ffffff", "#1e2528", "#1e2528"),
+             out=("#2b3034", "#2b3034", "#ffffff"),
+             fk="#2c5a78", lc="#8a4b14", rc="#2e6b3f")
+
+
+ROUTE_M, ROUTE_STEP = 7, 5        # 列を飛ばす矢印：箱からの離れ, 同じすき間を通る矢印どうしの間隔
+
+
+def _free_bands(nodes):
+    """列ごとの、箱が占める高さの区間（離れを含めて重なりをまとめたもの）"""
+    bands = {}
+    for n in nodes.values():
+        bands.setdefault(n["c"], []).append([n["y"] - ROUTE_M, n["y"] + n["h"] + ROUTE_M])
+    for c, lst in bands.items():
+        lst.sort()
+        merged = [lst[0]]
+        for a, b in lst[1:]:
+            if a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        bands[c] = merged
+    return bands
+
+
+def _edge_path(S, T, sy, ty, bands, used):
+    """矢印の経路。隣の列へはなめらかな曲線。列を飛ばすときは、途中の列で箱のすき間を水平に通る
+    （直線で結んだ高さが箱にかかれば、近い方の箱の上か下へずらす。同じすき間は ROUTE_STEP ずつ離す）."""
+    sx, tx = S["x"] + S["w"], T["x"]
+    if S["c"] == T["c"]:
+        tx = T["x"] + T["w"]
+        bend = sx + 20 + 6 * abs(T["lane"] - S["lane"])
+        return f"M{sx:.1f},{sy:.1f} C{bend:.1f},{sy:.1f} {bend:.1f},{ty:.1f} {tx + 2:.1f},{ty:.1f}"
+    pts = [(sx, sy)]
+    for c in range(S["c"] + 1, T["c"]):
+        xl = GUT + 14 + c * (W + G)
+        xm = xl + W / 2
+        y = sy + (ty - sy) * (xm - sx) / (tx - sx)
+        for a, b in bands.get(c, []):
+            if a < y < b:
+                edge_y, sign = (a, -1) if y - a <= b - y else (b, 1)
+                k = used.get((c, edge_y), 0)
+                used[(c, edge_y)] = k + 1
+                y = edge_y + sign * ROUTE_STEP * k
+                break
+        pts += [(xl - 6, y), (xl + W + 6, y)]
+    pts.append((tx - 1, ty))
+    d = [f"M{pts[0][0]:.1f},{pts[0][1]:.1f}"]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if abs(y1 - y0) < 0.05:
+            d.append(f"L{x1:.1f},{y1:.1f}")
+        else:
+            h = (x1 - x0) / 2
+            d.append(f"C{x0 + h:.1f},{y0:.1f} {x1 - h:.1f},{y1:.1f} {x1:.1f},{y1:.1f}")
+    return " ".join(d)
+
+
+def _edge_attrs(k, mode):
+    colname, dash, sw = EDGE_STYLE[k]
+    paint = f'stroke="{FIXED[colname]}" fill="none"' if mode == "file" else f'class="edge e-{k}" fill="none"'
+    return paint + f' stroke-width="{sw}"' + (f' stroke-dasharray="{dash}"' if dash else "")
 
 
 def svg(spec, mode="file"):
@@ -113,11 +204,16 @@ def svg(spec, mode="file"):
     nodes, lane_top, width, height = layout(spec)
     pos = ports(spec, nodes)
     F = FIXED
+    O = _opt(spec)
+    off = head_h(spec) - HEAD
     fam = "Meiryo, 'Yu Gothic', 'Hiragino Sans', sans-serif" if mode == "file" else "var(--font-body)"
+    ink = (f'fill="{F["ink"]}"' if mode == "file" else 'class="t-ink"')
+    ink2 = (f'fill="{F["ink2"]}"' if mode == "file" else 'class="t-ink2"')
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" width="{width:.0f}" height="{height:.0f}" '
          f'font-family="{fam}" role="img" aria-label="{html.escape(spec.TITLE)}" id="chain">']
     o.append("<defs>")
-    for nm, col in (("p", F["edge"]), ("t", F["trig"]), ("c", F["cpl"])):
+    for nm in sorted(set(O["edge_kinds"]) | {"p"}):
+        col = F[EDGE_STYLE[nm][0]]
         fill = f'fill="{col}"' if mode == "file" else f'class="ah-{nm}"'
         o.append(f'<marker id="ah-{nm}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">'
                  f'<path d="M0,0 L10,5 L0,10 z" {fill}/></marker>')
@@ -135,49 +231,46 @@ def svg(spec, mode="file"):
         y0 = y + lh / 2 - (len(lines) - 1) * 9
         for k, s in enumerate(lines):
             o.append(f'<text x="12" y="{y0 + k * 18:.1f}" font-size="13.5" font-weight="700" dominant-baseline="middle" '
-                     + (f'fill="{F["ink"]}"' if mode == "file" else 'class="t-ink"') + f'>{html.escape(s)}</text>')
+                     f'{ink}>{html.escape(s)}</text>')
+    # 列のまとまりの見出し（例：文献の図の「変状」）
+    for a, b, name in O["groups"]:
+        x1, x2 = GUT + 14 + a * (W + G), GUT + 14 + b * (W + G) + W
+        xm, half = (x1 + x2) / 2, 9 * len(name) + 14
+        o.append(f'<path d="M{x1:.1f},{27} L{x1:.1f},{19} L{xm - half:.1f},{19} M{xm + half:.1f},{19} L{x2:.1f},{19} '
+                 f'L{x2:.1f},{27}" fill="none" stroke-width="1.2" '
+                 + (f'stroke="{F["ink2"]}"' if mode == "file" else 'class="s-ink2"') + "/>")
+        o.append(f'<text x="{xm:.1f}" y="{19.5:.1f}" text-anchor="middle" dominant-baseline="middle" font-size="15" '
+                 f'font-weight="700" {ink}>{html.escape(name)}</text>')
     # 段の名前（改行があれば 2 行）
     for c, name in enumerate(spec.COLS):
         x = GUT + 14 + c * (W + G) + W / 2
         parts = name.split("\n")
         for k, s in enumerate(parts):
-            yy = 26 + (k - (len(parts) - 1) / 2) * 17
+            yy = off + 26 + (k - (len(parts) - 1) / 2) * 17
             o.append(f'<text x="{x:.1f}" y="{yy:.1f}" text-anchor="middle" font-size="14.5" font-weight="700" '
-                     + (f'fill="{F["ink"]}"' if mode == "file" else 'class="t-ink"') + f'>{html.escape(s)}</text>')
+                     f'{ink}>{html.escape(s)}</text>')
         if spec.COL_SUB[c]:
-            o.append(f'<text x="{x:.1f}" y="45" text-anchor="middle" font-size="10.5" '
-                     + (f'fill="{F["ink2"]}"' if mode == "file" else 'class="t-ink2"') + f'>{html.escape(spec.COL_SUB[c])}</text>')
+            o.append(f'<text x="{x:.1f}" y="{off + 47}" text-anchor="middle" font-size="10.5" '
+                     f'{ink2}>{html.escape(spec.COL_SUB[c])}</text>')
         if c < len(spec.COLS) - 1:
             xa = GUT + 14 + c * (W + G) + W + 8
-            o.append(f'<path d="M{xa:.1f},22 l{G - 16},0" stroke-width="1.4" '
+            o.append(f'<path d="M{xa:.1f},{off + 22} l{G - 16},0" stroke-width="1.4" '
                      + (f'stroke="{F["ink2"]}"' if mode == "file" else 'class="s-ink2"') + ' marker-end="url(#ah-p)"/>')
     # 矢印
     o.append('<g id="edges">')
+    bands, used = _free_bands(nodes), {}
     for s, t, k in spec.EDGES:
         S, T = nodes[s], nodes[t]
-        sy, ty = pos[(s, t, "out")], pos[(s, t, "in")]
-        sx = S["x"] + S["w"]
-        if S["c"] == T["c"]:
-            tx = T["x"] + T["w"]
-            bend = sx + 20 + 6 * abs(T["lane"] - S["lane"])
-            d = f"M{sx:.1f},{sy:.1f} C{bend:.1f},{sy:.1f} {bend:.1f},{ty:.1f} {tx + 2:.1f},{ty:.1f}"
-        else:
-            tx = T["x"]
-            dx = tx - sx
-            d = f"M{sx:.1f},{sy:.1f} C{sx + dx * 0.5:.1f},{sy:.1f} {tx - dx * 0.5:.1f},{ty:.1f} {tx - 1:.1f},{ty:.1f}"
-        dash = ' stroke-dasharray="5 4"' if k == "t" else ' stroke-dasharray="9 3 2 3"' if k == "c" else ""
-        col = F["trig"] if k == "t" else F["cpl"] if k == "c" else F["edge"]
-        paint = f'stroke="{col}" fill="none"' if mode == "file" else f'class="edge e-{k}" fill="none"'
-        sw_ = "1.8" if k == "c" else "1.3"
-        o.append(f'<path d="{d}" {paint} stroke-width="{sw_}"{dash} marker-end="url(#ah-{k})" data-s="{s}" data-t="{t}"/>')
+        d = _edge_path(S, T, pos[(s, t, "out")], pos[(s, t, "in")], bands, used)
+        o.append(f'<path d="{d}" {_edge_attrs(k, mode)} marker-end="url(#ah-{k})" data-s="{s}" data-t="{t}"/>')
     o.append("</g>")
     # ノード
     o.append('<g id="nodes">')
     for n in nodes.values():
         fill, stroke, txt = F[n["kind"]]
         x, y, h = n["x"], n["y"], n["h"]
-        rx = 3 if n["kind"] not in ("act", "env", "des") else 9
-        sw = 2.0 if n["kind"] in ("fail", "acc") else 1.2
+        rx = 9 if n["kind"] in O["round"] else 3
+        sw = 2.2 if n["kind"] in O["bold"] else 1.2
         o.append(f'<g class="node k-{n["kind"]}" data-id="{n["id"]}" tabindex="0" role="button" '
                  f'aria-label="{html.escape(spec.flat(n["label"]))}">')
         o.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{W}" height="{h:.1f}" rx="{rx}" stroke-width="{sw}" '
@@ -185,7 +278,7 @@ def svg(spec, mode="file"):
         for k, s in enumerate(n["lines"]):
             o.append(f'<text x="{x + PADX:.1f}" y="{y + 9 + (k + 0.5) * LH:.1f}" font-size="{FS}" dominant-baseline="middle" '
                      + (f'fill="{txt}"' if mode == "file" else 'class="lbl"')
-                     + (' font-weight="700"' if n["kind"] in ("fail", "acc") else "") + f'>{html.escape(s)}</text>')
+                     + (' font-weight="700"' if n["kind"] in O["bold_label"] else "") + f'>{html.escape(s)}</text>')
         if n["codes"]:
             o.append(f'<text x="{x + PADX:.1f}" y="{y + h - 12:.1f}" font-size="{FS2}" dominant-baseline="middle" '
                      + (f'fill="{F["ink2"]}"' if mode == "file" else 'class="code"')
@@ -204,47 +297,49 @@ def svg(spec, mode="file"):
 
 
 def legend_svg(spec):
-    """調書用の凡例（SVG の下に付ける, 2 行）."""
+    """調書用の凡例（SVG の下に付ける）。1 行目：種類と矢印、2 行目：印、3 行目以降：点検の注記と出典."""
     F = FIXED
-    items = [(k, spec.KINDS[k]) for k in ("act", "env", "des", "dmg", "perf", "fail", "acc")]
+    O = _opt(spec)
     o, x = [], 14
-    for k, name in items:
+    for k, name in spec.KINDS.items():
         fill, stroke, _ = F[k]
-        o.append(f'<rect x="{x}" y="8" width="22" height="14" rx="3" fill="{fill}" stroke="{stroke}" stroke-width="1.2"/>'
+        rx = 6 if k in O["round"] else 3
+        sw = 2.0 if k in O["bold"] else 1.2
+        o.append(f'<rect x="{x}" y="8" width="22" height="14" rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>'
                  f'<text x="{x + 28}" y="15.5" font-size="12" dominant-baseline="middle" fill="{F["ink"]}">{html.escape(name)}</text>')
-        x += 28 + 13 * len(name) + 18
-    o.append(f'<path d="M{x},15 l36,0" stroke="{F["edge"]}" stroke-width="1.3" marker-end="url(#ah-p)"/>'
-             f'<text x="{x + 44}" y="15.5" font-size="12" dominant-baseline="middle" fill="{F["ink"]}">進展</text>')
-    x += 90
-    o.append(f'<path d="M{x},15 l36,0" stroke="{F["trig"]}" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-t)"/>'
-             f'<text x="{x + 44}" y="15.5" font-size="12" dominant-baseline="middle" fill="{F["ink"]}">引き金となる外力</text>')
-    x += 170
-    o.append(f'<path d="M{x},15 l36,0" stroke="{F["cpl"]}" stroke-width="1.8" stroke-dasharray="9 3 2 3" marker-end="url(#ah-c)"/>'
-             f'<text x="{x + 44}" y="15.5" font-size="12" dominant-baseline="middle" fill="{F["ink"]}">連成（互いに進め合う）</text>')
-    x_end = x + 200
+        x += 28 + 12.5 * len(name) + 18
+    for k, name in O["edge_kinds"].items():
+        o.append(f'<path d="M{x},15 l36,0" {_edge_attrs(k, "file")} marker-end="url(#ah-{k})"/>'
+                 f'<text x="{x + 44}" y="15.5" font-size="12" dominant-baseline="middle" fill="{F["ink"]}">{html.escape(name)}</text>')
+        x += 44 + 12.5 * len(name) + 22
+    x_end = x
     x = 14
     for f_, (mark, name) in spec.FLAGS.items():
         o.append(f'<circle cx="{x + 8}" cy="42" r="8.5" fill="{F[f_]}"/><text x="{x + 8}" y="42.5" font-size="10" '
                  f'font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#fff">{mark}</text>'
                  f'<text x="{x + 22}" y="42.5" font-size="12" dominant-baseline="middle" fill="{F["ink"]}">{html.escape(name)}</text>')
         x += 22 + 12.5 * len(name) + 22
-    o.append(f'<text x="14" y="66.5" font-size="11" dominant-baseline="middle" fill="{F["ink2"]}">'
-             f'{html.escape(spec.CODE_NOTE)}</text>')                 # 点検の注記は 3 行目
-    return "\n".join(o), max(x_end, x, 14 + 11 * len(spec.CODE_NOTE))
+    notes = [spec.CODE_NOTE] + ([f"出典：{spec.SOURCE}"] if getattr(spec, "SOURCE", "") else [])
+    for i, t in enumerate(notes):
+        o.append(f'<text x="14" y="{66.5 + 18 * i}" font-size="11" dominant-baseline="middle" fill="{F["ink2"]}">'
+                 f'{html.escape(t)}</text>')
+    height = 66.5 + 18 * (len(notes) - 1) + 14
+    return "\n".join(o), max([x_end, x] + [14 + 11 * len(t) for t in notes]), height
 
 
-LEGEND_H = 80                     # 凡例の高さ（3 行）
+LEGEND_H = 80                     # 凡例の高さ（3 行。出典があれば 1 行ふえる）
 
 
 def full_svg(spec):
     """凡例を下に付けた 1 枚の SVG（文字列）と大きさ."""
     body, nodes, width, height = svg(spec, "file")
-    leg, lw = legend_svg(spec)
-    total_h = height + LEGEND_H
+    leg, lw, lh = legend_svg(spec)
+    leg_h = max(LEGEND_H, lh)
+    total_h = height + leg_h
     head, rest = body.split(">", 1)
     head = head.replace(f'height="{height:.0f}"', f'height="{total_h:.0f}"').replace(
         f'viewBox="0 0 {width:.0f} {height:.0f}"', f'viewBox="0 0 {width:.0f} {total_h:.0f}"')
-    rest = rest.replace("</svg>", f'<rect x="0" y="{height:.0f}" width="{width:.0f}" height="{LEGEND_H}" fill="#ffffff"/>'
+    rest = rest.replace("</svg>", f'<rect x="0" y="{height:.0f}" width="{width:.0f}" height="{leg_h:.0f}" fill="#ffffff"/>'
                                   f'<g transform="translate(0,{height:.0f})">{leg}</g></svg>')
     return head + ">" + rest, width, total_h
 
@@ -269,12 +364,18 @@ def write_file_outputs(spec, out_dir):
 
 
 def page_data(spec):
+    O = _opt(spec)
     nodes = {n[0]: dict(label=spec.flat(n[4]), c=spec.flat(spec.COLS[n[1]]), lane=spec.flat(spec.LANES[n[2]]),
-                        kind=spec.KINDS[n[3]], k=n[3],
-                        codes=[f"{c:02d}" if isinstance(c, int) else str(c) for c in n[5]],
+                        kind=spec.KINDS[n[3]], k=n[3], codes=[code_str(spec, c) for c in n[5]],
                         flags=[spec.FLAGS[f][1] for f in n[6]], desc=n[7]) for n in spec.NODES}
+    paths = spec.PAGE.get("paths") or [("この変状に至る要因", "up", list(O["factor"]) + ["*extra"]),
+                                       ("行き着く破壊", "down", ["fail"]),
+                                       ("行き着く重大事故・利用への影響", "down", list(O["end"]))]
     return dict(nodes=nodes, edges=[[s, t, k] for s, t, k in spec.EDGES], prefix=spec.CODE_PREFIX,
-                extra=list(spec.EXTRA_FACTORS),
+                sep=getattr(spec, "CODE_SEP", "・"), extra=list(spec.EXTRA_FACTORS),
+                paths=[[lab, d, list(ks)] for lab, d, ks in paths],
+                hint=spec.PAGE.get("hint", "ノード（四角）を押すと、その変状に至る要因と、その先への経路を強調する。"
+                                           "上のボタンで重点シナリオの経路だけを見られる。"),
                 scenarios=[dict(id=i, name=nm, members=m, note=nt) for i, nm, m, nt in spec.SCENARIOS])
 
 
@@ -285,7 +386,9 @@ PAGE_CSS = """
   --laneA: #f4f6f3; --laneB: #ffffff; --edge: #7d878c; --trig: #c0582e; --cpl: #a8327a; --accent: #2c5a78;
   --act-f: #fbe3d6; --act-s: #c0582e; --env-f: #dcefe9; --env-s: #2f7d6b; --des-f: #e7e4f4; --des-s: #5b4fa0;
   --dmg-f: #ffffff; --dmg-s: #8a9499; --perf-f: #fff3d1; --perf-s: #a87b12; --fail-f: #f8dcd9; --fail-s: #a33a2e;
-  --acc-f: #2b3034; --acc-s: #2b3034; --acc-t: #ffffff; --fk: #2c5a78; --lc: #8a4b14; --rc: #2e6b3f; --sel: #1f6fb2;
+  --acc-f: #2b3034; --acc-s: #2b3034; --acc-t: #ffffff;
+  --ins-f: #dde2e4; --ins-s: #6b767b; --non-f: #ffffff; --non-s: #1e2528; --out-f: #2b3034; --out-s: #2b3034; --out-t: #ffffff;
+  --fk: #2c5a78; --lc: #8a4b14; --rc: #2e6b3f; --sel: #1f6fb2;
   --font-head: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", serif;
   --font-body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
 }
@@ -294,13 +397,17 @@ PAGE_CSS = """
   --laneA: #1d2327; --laneB: #191e22; --edge: #8c979c; --trig: #e58a5f; --cpl: #e27bb8; --accent: #86b5d4;
   --act-f: #4a2e22; --act-s: #e58a5f; --env-f: #1f3a33; --env-s: #6cc0a8; --des-f: #2e2a45; --des-s: #a99ce6;
   --dmg-f: #232a2f; --dmg-s: #7d898f; --perf-f: #3d3318; --perf-s: #d9ad46; --fail-f: #45231f; --fail-s: #e88a7c;
-  --acc-f: #e5e8e6; --acc-s: #e5e8e6; --acc-t: #15191c; --fk: #4f8fbd; --lc: #b8742f; --rc: #4f9a63; --sel: #7fb8e6; color-scheme: dark; } }
+  --acc-f: #e5e8e6; --acc-s: #e5e8e6; --acc-t: #15191c;
+  --ins-f: #343e44; --ins-s: #93a0a6; --non-f: #191e22; --non-s: #e5e8e6; --out-f: #e5e8e6; --out-s: #e5e8e6; --out-t: #15191c;
+  --fk: #4f8fbd; --lc: #b8742f; --rc: #4f9a63; --sel: #7fb8e6; color-scheme: dark; } }
 :root[data-theme="dark"] {
   --paper: #121619; --sheet: #191e22; --ink: #e5e8e6; --ink2: #9aa6ab; --rule: #34404a;
   --laneA: #1d2327; --laneB: #191e22; --edge: #8c979c; --trig: #e58a5f; --cpl: #e27bb8; --accent: #86b5d4;
   --act-f: #4a2e22; --act-s: #e58a5f; --env-f: #1f3a33; --env-s: #6cc0a8; --des-f: #2e2a45; --des-s: #a99ce6;
   --dmg-f: #232a2f; --dmg-s: #7d898f; --perf-f: #3d3318; --perf-s: #d9ad46; --fail-f: #45231f; --fail-s: #e88a7c;
-  --acc-f: #e5e8e6; --acc-s: #e5e8e6; --acc-t: #15191c; --fk: #4f8fbd; --lc: #b8742f; --rc: #4f9a63; --sel: #7fb8e6; color-scheme: dark; }
+  --acc-f: #e5e8e6; --acc-s: #e5e8e6; --acc-t: #15191c;
+  --ins-f: #343e44; --ins-s: #93a0a6; --non-f: #191e22; --non-s: #e5e8e6; --out-f: #e5e8e6; --out-s: #e5e8e6; --out-t: #15191c;
+  --fk: #4f8fbd; --lc: #b8742f; --rc: #4f9a63; --sel: #7fb8e6; color-scheme: dark; }
 body { background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.75; }
 .wrap { max-width: 1480px; margin: 0 auto; padding-inline: 16px; padding-block: 22px 56px; display: grid; gap: 16px; }
 header { display: grid; gap: 4px; }
@@ -317,21 +424,24 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 button.chip:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink2); margin-top: 10px; align-items: center; }
 .legend span.sw { display: inline-block; width: 22px; height: 13px; border-radius: 3px; border: 1.3px solid; vertical-align: -2px; margin-right: 5px; }
+.legend span.sw.rd { border-radius: 6px; } .legend span.sw.bd2 { border-width: 2.2px; }
 .legend span.ln { display: inline-block; width: 30px; border-top: 1.6px solid var(--edge); vertical-align: 4px; margin-right: 5px; }
-.legend span.ln.t { border-top: 1.6px dashed var(--trig); }
+.legend span.ln.t, .legend span.ln.s { border-top: 1.6px dashed var(--trig); }
 .legend span.ln.c { border-top: 2.2px dashed var(--cpl); }
 .legend span.bd { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 700; margin-right: 5px; }
 .scroll { overflow-x: auto; }
 #chain { display: block; max-width: none; height: auto; }
 #chain .lane-0 { fill: var(--laneA); } #chain .lane-1 { fill: var(--laneB); } #chain .rule { stroke: var(--rule); }
 #chain .t-ink { fill: var(--ink); } #chain .t-ink2 { fill: var(--ink2); } #chain .s-ink2 { stroke: var(--ink2); }
-#chain .edge.e-p { stroke: var(--edge); } #chain .edge.e-t { stroke: var(--trig); } #chain .edge.e-c { stroke: var(--cpl); }
-#chain .ah-p { fill: var(--edge); } #chain .ah-t { fill: var(--trig); } #chain .ah-c { fill: var(--cpl); }
+#chain .edge.e-p { stroke: var(--edge); } #chain .edge.e-t, #chain .edge.e-s { stroke: var(--trig); } #chain .edge.e-c { stroke: var(--cpl); }
+#chain .ah-p { fill: var(--edge); } #chain .ah-t, #chain .ah-s { fill: var(--trig); } #chain .ah-c { fill: var(--cpl); }
 #chain .lbl { fill: var(--ink); } #chain .code { fill: var(--ink2); }
 #chain .k-act .box { fill: var(--act-f); stroke: var(--act-s); } #chain .k-env .box { fill: var(--env-f); stroke: var(--env-s); }
 #chain .k-des .box { fill: var(--des-f); stroke: var(--des-s); } #chain .k-dmg .box { fill: var(--dmg-f); stroke: var(--dmg-s); }
 #chain .k-perf .box { fill: var(--perf-f); stroke: var(--perf-s); } #chain .k-fail .box { fill: var(--fail-f); stroke: var(--fail-s); }
 #chain .k-acc .box { fill: var(--acc-f); stroke: var(--acc-s); } #chain .k-acc .lbl { fill: var(--acc-t); }
+#chain .k-ins .box { fill: var(--ins-f); stroke: var(--ins-s); } #chain .k-non .box { fill: var(--non-f); stroke: var(--non-s); }
+#chain .k-out .box { fill: var(--out-f); stroke: var(--out-s); } #chain .k-out .lbl { fill: var(--out-t); }
 #chain .f-fk { fill: var(--fk); } #chain .f-lc { fill: var(--lc); } #chain .f-rc { fill: var(--rc); }
 #chain .node { cursor: pointer; transition: opacity .15s; } #chain .edge { transition: opacity .15s; }
 #chain .node:focus { outline: none; } #chain .node:focus-visible .box, #chain .node.sel .box { stroke: var(--sel); stroke-width: 3.2; }
@@ -352,6 +462,7 @@ table { border-collapse: collapse; font-size: 13.5px; width: 100%; font-variant-
 th, td { border-bottom: 1px solid var(--rule); padding: 5px 8px; text-align: left; vertical-align: top; }
 th { color: var(--ink2); font-weight: 700; font-size: 12.5px; }
 td.no { white-space: nowrap; }
+td.mk { text-align: center; }
 .note { font-size: 13px; color: var(--ink2); }
 ul.note { padding-left: 1.2em; margin: 4px 0; }
 """
@@ -369,13 +480,13 @@ PAGE_JS = """
   const detail = document.getElementById('detail');
   const chips = Array.from(document.querySelectorAll('button.chip[data-sc]'));
   const esc = s => s.replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  const names = ids => ids.map(i => esc(D.nodes[i].label)).join('、') || '—';
+  const name = i => esc(D.nodes[i].label) + (D.nodes[i].codes.length ? ' ' + esc(D.nodes[i].codes.join(D.sep)) : '');
+  const names = ids => ids.map(name).join('、') || '—';
   function clear() {
     svg.classList.remove('focus'); nodes.forEach(n => n.classList.remove('on', 'sel')); edges.forEach(e => e.classList.remove('on'));
   }
   function press(id) { chips.forEach(c => c.setAttribute('aria-pressed', String(c.dataset.sc === id))); }
-  function showAll() { clear(); press('all');
-    detail.innerHTML = '<p class="note">ノード（四角）を押すと、その変状に至る要因と、その先の破壊・事故への経路を強調する。上のボタンで重点シナリオの経路だけを見られる。</p>'; }
+  function showAll() { clear(); press('all'); detail.innerHTML = '<p class="note">' + esc(D.hint) + '</p>'; }
   function selectNode(id) {
     clear(); press('');
     const up = walk(id, inn), down = walk(id, out);
@@ -386,14 +497,16 @@ PAGE_JS = """
       const downEdge = (down.has(s) || s === id) && down.has(t);
       if (upEdge || downEdge) e.classList.add('on'); });
     const n = D.nodes[id];
-    const factors = [...up].filter(k => ['act', 'env', 'des'].includes(D.nodes[k].k) || D.extra.includes(k));
-    const acc = [...down].filter(k => D.nodes[k].k === 'acc');
-    const fails = [...down].filter(k => D.nodes[k].k === 'fail');
+    const order = Object.keys(D.nodes);
+    const lists = D.paths.map(([lab, dir, kinds]) => {
+      const pool = dir === 'up' ? up : down;
+      const ids = order.filter(k => pool.has(k) && (kinds.includes(D.nodes[k].k) || (kinds.includes('*extra') && D.extra.includes(k))));
+      return '<div><b>' + esc(lab) + '</b><br>' + names(ids) + '</div>';
+    });
     detail.innerHTML = '<h3>' + esc(n.label) + '</h3><div class="tags"><span>' + esc(n.kind) + '</span><span>' + esc(n.lane) +
       '</span><span>' + esc(n.c) + '</span>' + n.codes.map(c => '<span>' + esc(D.prefix) + ' ' + esc(c) + '</span>').join('') +
       n.flags.map(f => '<span>' + esc(f) + '</span>').join('') + '</div><p>' + esc(n.desc) + '</p>' +
-      '<div class="paths"><div><b>この変状に至る要因</b><br>' + names(factors) + '</div><div><b>行き着く破壊</b><br>' + names(fails) +
-      '</div><div><b>行き着く重大事故・利用への影響</b><br>' + names(acc) + '</div></div>';
+      '<div class="paths">' + lists.join('') + '</div>';
   }
   function selectScenario(sc) {
     clear(); press(sc.id); svg.classList.add('focus');
@@ -415,26 +528,45 @@ PAGE_JS = """
 """
 
 
+def _table(head, rows, classes=None):
+    """表の HTML（rows はセルの文字列のリスト。classes は列ごとの td の class）"""
+    classes = classes or []
+    th = "".join(f"<th>{html.escape(h)}</th>" for h in head)
+    body = "".join("<tr>" + "".join(
+        f'<td{f" class={chr(34)}{classes[i]}{chr(34)}" if i < len(classes) and classes[i] else ""}>{html.escape(str(v))}</td>'
+        for i, v in enumerate(r)) + "</tr>" for r in rows)
+    return f'<div class="scroll"><table><tr>{th}</tr>{body}</table></div>'
+
+
 def write_page(spec, path):
     """クリックで経路をたどれる公開ページ用の HTML（本文だけ, Artifact で公開する）."""
     body, nodes, width, height = svg(spec, "page")
     data = page_data(spec)
+    O = _opt(spec)
     P = spec.PAGE
     chips = '<button class="chip" type="button" data-sc="all" aria-pressed="true">すべて</button>' + "".join(
         f'<button class="chip" type="button" data-sc="{s["id"]}" aria-pressed="false">{html.escape(s["name"])}</button>'
         for s in data["scenarios"])
-    sw = "".join(f'<span><span class="sw" style="background:var(--{k}-f);border-color:var(--{k}-s)"></span>{html.escape(spec.KINDS[k])}</span>'
-                 for k in ("act", "env", "des", "dmg", "perf", "fail", "acc"))
+    sw = "".join(f'<span><span class="sw{" rd" if k in O["round"] else ""}{" bd2" if k in O["bold"] else ""}" '
+                 f'style="background:var(--{k}-f);border-color:var(--{k}-s)"></span>{html.escape(nm)}</span>'
+                 for k, nm in spec.KINDS.items())
+    lns = "".join(f'<span><span class="ln {k}"></span>{html.escape(nm)}</span>' for k, nm in O["edge_kinds"].items())
     flags = "".join(f'<span><span class="bd" style="background:var(--{f})">{m}</span>{html.escape(nm)}</span>'
                     for f, (m, nm) in spec.FLAGS.items())
-    legend = (sw + '<span><span class="ln"></span>進展</span><span><span class="ln t"></span>引き金となる外力</span>'
-              '<span><span class="ln c"></span>連成（互いに進め合う）</span>' + flags)
+    legend = sw + lns + flags
     scen = "".join(f'<div><b>{html.escape(s["name"])}</b><br>{html.escape(s["note"])}</div>' for s in data["scenarios"])
     rows = []
     for code, what in spec.CODES.items():
         hits = [spec.flat(n[4]) for n in spec.NODES if code in n[5]]
-        rows.append(f'<tr><td class="no">{html.escape(str(code))}</td><td>{html.escape(what)}</td>'
-                    f'<td>{html.escape("、".join(hits))}</td></tr>')
+        cells = list(what) if isinstance(what, (tuple, list)) else [what]
+        rows.append([code_str(spec, code)] + cells + ["、".join(hits) or "―"])
+    head = list(getattr(spec, "CODE_HEAD", ["部位", "主な点検の内容"])) + ["連鎖図の変状"]
+    codes_table = _table(head, rows, ["no"])
+    extra = "".join(
+        f'<section class="panel"><h2>{html.escape(t["title"])}</h2>'
+        f'{_table(t["head"], t["rows"], [""] + ["mk"] * (len(t["head"]) - 1))}'
+        + (f'<p class="note">{html.escape(t["note"])}</p>' if t.get("note") else "") + "</section>"
+        for t in P.get("tables", []))
     notes = "".join(f"<li>{html.escape(t)}</li>" for t in P["notes"])
     page = f"""<title>{html.escape(spec.TITLE)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -453,13 +585,12 @@ def write_page(spec, path):
 </section>
 <section class="panel scroll" aria-label="{html.escape(spec.TITLE)}">{body}</section>
 <section class="panel detail" id="detail" aria-live="polite"></section>
-<div class="grid2">
-  <section class="panel"><h2>{html.escape(P["scenario_title"])}</h2><div class="sc">{scen}</div></section>
-  <section class="panel"><h2>{html.escape(P["code_title"])}</h2>
-    <div class="scroll"><table><tr><th>部位</th><th>主な点検の内容</th><th>連鎖図の変状</th></tr>{"".join(rows)}</table></div>
-    <p class="note">{html.escape(spec.CODE_NOTE)}</p>
-  </section>
-</div>
+<section class="panel"><h2>{html.escape(P["scenario_title"])}</h2><div class="sc">{scen}</div></section>
+<section class="panel"><h2>{html.escape(P["code_title"])}</h2>
+  {codes_table}
+  <p class="note">{html.escape(spec.CODE_NOTE)}</p>
+</section>
+{extra}
 <section class="panel"><h2>作り方と、これから詰めること</h2>
 <ul class="note">{notes}</ul>
 </section>
