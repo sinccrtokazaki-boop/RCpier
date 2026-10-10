@@ -136,3 +136,28 @@ def test_batch_with_deterioration_models():
     for a, b in zip(rows[::2], rows[1::2]):
         assert json.loads(a["det"])["chloride.C0"] == json.loads(b["det"])["chloride.C0"]
         assert b["allow_surcharge"] <= a["allow_surcharge"] * (1 + 1e-9)
+
+
+# ============================================================ 洗掘・項目ごとの乱数系列
+def test_scour_with_age_and_common_draws_across_blocks():
+    """洗掘深さ = depth·(1 − exp(−t/τ))：0 年で 0、τ で 63%。scour・scour_ratio を作る。
+    項目ごとに別の乱数系列なので、塩害だけのシナリオと全部のシナリオで塩害の抽出値が同じ"""
+    assert dm.scour_depth(0.0, 0.5, 10.0) == 0.0
+    assert dm.scour_depth(10.0, 0.5, 10.0) == pytest.approx(0.5 * (1 - math.exp(-1)))
+    s = _scen(n=20)
+    s["deterioration"]["age"] = [0, 40]
+    s["deterioration"]["scour"] = {"depth": {"lognormal": {"median": 0.5, "beta": 0.8}}, "tau": 10, "ratio": {"S": 1.0, "C1": 0.5}}
+    ps = scenario_params(read_scenarios(s))
+    for a, b in zip(ps[::2], ps[1::2]):
+        assert a["scour"] == 0.0 and a["rebar_loss_bottom"] == 0.0 and a["corrosion_head"] == 0.0
+        assert b["scour"] == pytest.approx(b["_det"]["scour.depth"] * (1 - math.exp(-4.0)))
+        assert b["scour_ratio"] == {"S": 1.0, "C1": 0.5}
+    only = _scen(n=20)
+    only["deterioration"]["age"] = [0, 40]
+    only["deterioration"].pop("pile")
+    po = scenario_params(read_scenarios(only))
+    assert [p["_det"]["chloride.C0"] for p in po] == [p["_det"]["chloride.C0"] for p in ps]
+    with pytest.raises(InputError, match="deterioration から作る"):
+        s2 = copy.deepcopy(s)
+        s2["base"]["scour"] = 0.3
+        read_scenarios(s2)

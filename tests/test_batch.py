@@ -127,6 +127,8 @@ def test_refine_reason_rule():
     assert refine_reason({**row, "n_yield": 2}, {"pile_yield": True, "residual": [0.1, 0.5]}) == "杭の降伏・残留変位"
     assert refine_reason({**row, "reached": False}, {"pile_yield": True}) == "打ち切り"
     assert refine_reason(row, "all") == "all" and refine_reason(row, "none") == ""
+    assert refine_reason({**row, "n_yield": 2}, {"pile_yield": True}, skip_above=0.3) == ""       # 0.3 m 以上は回さない
+    assert refine_reason({**row, "n_yield": 2}, {"pile_yield": True}, skip_above=0.5) == "杭の降伏"
 
 
 def test_resume_and_parallel(serial, tmp_path):

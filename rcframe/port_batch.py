@@ -5,7 +5,9 @@
         1段目 ふるい分け（screen）: 地中部を粗く分割（screening.segment）、Mp(N) の cos 式のヒンジ。
               地盤変位 0（慣性力のみ）のシナリオは仮想固定点モデル
         2段目 詳細化（refine）: 入力の分割・ファイバーのヒンジ（εcu はシナリオの ecu）で計算し直す。
-              対象は refine.when の条件（杭の降伏、上部工の残留変位の範囲）に当てはまるシナリオ
+              対象は refine.when の条件（杭の降伏、上部工の残留変位の範囲）に当てはまるシナリオ。
+              refine.skip_above [m] があれば、1段目の残留変位がそれ以上のシナリオは回さない（判定が利用不可に
+              決まっている場合の計算時間の短縮。利用不可の残留変位の閾値より大きくする）
     並列実行（concurrent.futures.ProcessPoolExecutor、workers）。結果は 1シナリオ 1行の JSON Lines に
     逐次追記し、再実行時は計算済み（同じ id・段階）を飛ばす。CSV にも書き出す
     劣化の変数（DET_KEYS、変状連鎖の重点シナリオ）:
@@ -87,9 +89,7 @@ def read_scenarios(d):
             raise InputError("scenarios: grid と deterioration は同時に使えません（deterioration は sample 個を抽出）")
         if sample is None:
             raise InputError("scenarios.deterioration には sample（抽出する数）が必要です")
-        made = (["rebar_loss_bottom"] if det["chloride"] else []) + (["rebar_loss_top"] if det["chloride_top"] else []) + \
-            ([f"corrosion_{z}" for z in det["pile"]] + ["corrosion_boundary"] if det["pile"] else [])
-        dup = sorted(k for k in made if k in base or k in dists)
+        dup = sorted(k for k in det_model.made_keys(det) if k in base or k in dists)
         if dup:
             raise InputError(f"scenarios: {dup} は deterioration から作るので base・distributions に書けません")
     scr = dict(d.get("screening") or {})
@@ -97,7 +97,7 @@ def read_scenarios(d):
     ref = d.get("refine", {"when": {"pile_yield": True}})
     if ref in ("all", "none"):
         ref = {"when": ref}
-    _check_keys(ref, ("when", "segment"), "scenarios.refine")
+    _check_keys(ref, ("when", "segment", "skip_above"), "scenarios.refine")
     when = ref.get("when", {"pile_yield": True})
     if when not in ("all", "none"):
         _check_keys(when, ("pile_yield", "residual"), "scenarios.refine.when")
@@ -107,7 +107,8 @@ def read_scenarios(d):
                 raise InputError("scenarios.refine.when.residual: [下限, 上限]（m、下限 < 上限）です")
     return dict(base=base, grid=grid, dists=dists, det=det, sample=sample, seed=int(d.get("seed", 1)),
                 screening=dict(segment=_num(scr.get("segment", 1.0), "scenarios.screening.segment")),
-                refine=dict(when=when, segment=ref.get("segment")),
+                refine=dict(when=when, segment=ref.get("segment"),
+                            skip_above=None if ref.get("skip_above") is None else _num(ref["skip_above"], "scenarios.refine.skip_above")),
                 workers=int(d.get("workers", 1)))
 
 
@@ -155,7 +156,7 @@ def scenario_params(cfg):
     または distributions から抽出した値（sample 個、seed で再現）を重ねたもの"""
     if cfg.get("det"):                                   # 劣化のモデル: 抽出 1 組ごとに年数の数だけシナリオ
         rng = np.random.default_rng(cfg["seed"])
-        rng_det = np.random.default_rng([cfg["seed"], 2])
+        rng_det = det_model.rngs(cfg["seed"])
         keys = sorted(cfg.get("dists") or {})
         out = []
         for _ in range(cfg["sample"]):
@@ -368,8 +369,10 @@ def _surface_values(params):
     return [float(v) for v in vals]
 
 
-def refine_reason(row, when):
-    """2段目に回す理由（空文字なら回さない）"""
+def refine_reason(row, when, skip_above=None):
+    """2段目に回す理由（空文字なら回さない）。1段目の残留変位が skip_above [m] 以上なら回さない"""
+    if skip_above is not None and abs(row["deck_residual"]) >= skip_above:
+        return ""
     if when == "all":
         return "all"
     if when == "none":
@@ -443,13 +446,13 @@ class Batch:
             log(f"{tier}: 計算 {len(todo)} 件（計算済み {sum(1 for k in done if k[1] == tier)} 件）")
             for row in self._map(todo, tier, workers):
                 if tier == "screen":
-                    row["refine_reason"] = refine_reason(row, self.cfg["refine"]["when"])
+                    row["refine_reason"] = refine_reason(row, self.cfg["refine"]["when"], self.cfg["refine"]["skip_above"])
                 record(row)
             # 計算済みの 1段目にも 2段目の判定を付け直す（条件を変えて再実行した場合）
             if tier == "screen":
                 for r in rows:
                     if r["tier"] == "screen":
-                        r["refine_reason"] = refine_reason(r, self.cfg["refine"]["when"])
+                        r["refine_reason"] = refine_reason(r, self.cfg["refine"]["when"], self.cfg["refine"]["skip_above"])
         if out:
             try:
                 write_csv(rows, f"{out}.csv")

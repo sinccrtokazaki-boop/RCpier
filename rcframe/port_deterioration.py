@@ -9,6 +9,8 @@ YAML の scenarios.deterioration（sample 個を抽出。distributions と同時
     pile:                           杭の防食と腐食 → corrosion_head / sea / soil（boundary → corrosion_boundary）
         head / sea / soil: {rate, life（省略可）, factor（既定 0）}
                                     腐食速度 [mm/年]、防食の寿命 [年]、寿命までの腐食速度の比（電気防食 90% なら 0.1）
+    scour:                          洗掘 → scour（ratio → scour_ratio）
+        depth, tau（既定 10）, ratio 平衡の洗掘深さ [m]、時定数 [年]、列ごとの比（省略時は全ての列に depth）
 各値は数値、または確率分布 {lognormal: {median, beta}} / {normal: {mean, sd}} / {uniform: [a, b]}
 
 モデル:
@@ -18,6 +20,8 @@ YAML の scenarios.deterioration（sample 個を抽出。distributions と同時
     鉄筋の腐食（一様腐食）: 半径の減少 Δr = 0.0116·icorr·(t − t_i) [mm]（Faraday 則、1 μA/cm² ≒ 11.6 μm/年）
         断面欠損率 = 1 − ((bar − 2Δr)/bar)²（上限 0.99）。孔食・ひび割れによる加速は考えない
     杭の腐食: 腐食量 = rate·(factor·min(t, life) + max(t − life, 0))（life を省略すれば rate·t）
+    洗掘: 深さ = depth·(1 − exp(−t/tau))（供用開始から平衡の深さに近づく）
+抽出: 項目（chloride・chloride_top・pile・scour）ごとに別の乱数系列を使う（項目の組み合わせを変えても同じ抽出値）
 単位: 年、mm、kg/m³、cm²/年、μA/cm²
 """
 import math
@@ -59,6 +63,14 @@ def rebar_loss(t, t_i, icorr, bar):
     dr = FARADAY_MM * icorr * (t - t_i)
     rem = max(bar - 2.0 * dr, 0.0) / bar
     return min(1.0 - rem * rem, LOSS_MAX)
+
+
+def scour_depth(t, depth, tau):
+    """供用年数 t の洗掘深さ [m]（平衡の深さ depth に時定数 tau で近づく）"""
+    return depth * (1.0 - math.exp(-t / tau)) if t > 0 else 0.0
+
+
+BLOCKS = ("chloride", "chloride_top", "pile", "scour")
 
 
 def pile_loss(t, rate, life=None, factor=0.0):
@@ -121,14 +133,14 @@ def read_models(d):
     """scenarios.deterioration を読む（なければ None）。戻り値: dict(ages, chloride, chloride_top, pile, boundary)"""
     if not d:
         return None
-    _check_keys(d, ("age", "chloride", "chloride_top", "pile"), "scenarios.deterioration")
+    _check_keys(d, ("age",) + BLOCKS, "scenarios.deterioration")
     if "age" not in d:
         raise InputError("scenarios.deterioration: age（供用年数）がありません")
     ages = d["age"] if isinstance(d["age"], list) else [d["age"]]
     ages = [_num(a, "scenarios.deterioration.age") for a in ages]
     if not ages or any(a < 0 for a in ages) or len(set(ages)) != len(ages):
         raise InputError("scenarios.deterioration.age: 0 以上の重複しない年数です")
-    out = dict(ages=ages, chloride=None, chloride_top=None, pile=None, boundary=None)
+    out = dict(ages=ages, chloride=None, chloride_top=None, pile=None, boundary=None, scour=None)
     for k in ("chloride", "chloride_top"):
         if d.get(k):
             out[k] = _read_chloride(d[k], f"scenarios.deterioration.{k}")
@@ -152,23 +164,51 @@ def read_models(d):
             raise InputError(f"{what}: head / sea / soil のいずれかを指定してください")
         out["pile"] = zones
         out["boundary"] = _num(p.get("boundary", -1.0), f"{what}.boundary")
-    if not (out["chloride"] or out["chloride_top"] or out["pile"]):
-        raise InputError("scenarios.deterioration: chloride / chloride_top / pile のいずれかを指定してください")
+    if d.get("scour"):
+        s, what = d["scour"], "scenarios.deterioration.scour"
+        _check_keys(s, ("depth", "tau", "ratio"), what)
+        if "depth" not in s:
+            raise InputError(f"{what}: depth（平衡の洗掘深さ [m]）がありません")
+        ratio = s.get("ratio")
+        if ratio is not None and (not isinstance(ratio, dict) or not ratio):
+            raise InputError(f"{what}.ratio: 列ごとの比 {{列: 比}} です")
+        out["scour"] = dict(depth=_read_value(s["depth"], f"{what}.depth"), tau=_read_value(s.get("tau", 10.0), f"{what}.tau"),
+                            ratio=None if ratio is None else {str(k): _num(v, f"{what}.ratio.{k}") for k, v in ratio.items()})
+    if not any(out[k] for k in BLOCKS):
+        raise InputError("scenarios.deterioration: chloride / chloride_top / pile / scour のいずれかを指定してください")
     return out
 
 
+def made_keys(cfg):
+    """deterioration から作るシナリオの変数の名前（base・distributions と重ねられない）"""
+    keys = (["rebar_loss_bottom"] if cfg["chloride"] else []) + (["rebar_loss_top"] if cfg["chloride_top"] else [])
+    if cfg["pile"]:
+        keys += [f"corrosion_{z}" for z in cfg["pile"]] + ["corrosion_boundary"]
+    if cfg["scour"]:
+        keys += ["scour", "scour_ratio"]
+    return keys
+
+
 # ============================================================ 抽出と変数
+def rngs(seed):
+    """項目ごとの乱数系列"""
+    return {b: np.random.default_rng([seed, 2, k]) for k, b in enumerate(BLOCKS)}
+
+
 def draw(rng, cfg):
-    """物理量を 1 組抽出する。戻り値: {名前: 値}（名前は chloride.C0、pile.head.rate など）"""
+    """物理量を 1 組抽出する。rng: 項目ごとの乱数系列（rngs）。戻り値: {名前: 値}（chloride.C0、pile.head.rate など）"""
     s = {}
     for k in ("chloride", "chloride_top"):
         if cfg[k]:
             for n in CHLORIDE_KEYS:
-                s[f"{k}.{n}"] = _draw(rng, cfg[k][n])
+                s[f"{k}.{n}"] = _draw(rng[k], cfg[k][n])
     for z, v in (cfg["pile"] or {}).items():
         for n in ("rate", "life"):
             if n in v:
-                s[f"pile.{z}.{n}"] = _draw(rng, v[n])
+                s[f"pile.{z}.{n}"] = _draw(rng["pile"], v[n])
+    if cfg["scour"]:
+        for n in ("depth", "tau"):
+            s[f"scour.{n}"] = _draw(rng["scour"], cfg["scour"][n])
     return s
 
 
@@ -190,6 +230,10 @@ def params_at(sample, age, cfg):
             life = sample.get(f"pile.{z}.life")
             out[f"corrosion_{z}"] = pile_loss(age, rate, None if life is None else max(life, 0.0), v["factor"])
         out["corrosion_boundary"] = cfg["boundary"]
+    if cfg["scour"]:
+        out["scour"] = scour_depth(age, max(sample["scour.depth"], 0.0), max(sample["scour.tau"], 1e-9))
+        if cfg["scour"]["ratio"]:
+            out["scour_ratio"] = dict(cfg["scour"]["ratio"])
     return out, info
 
 
