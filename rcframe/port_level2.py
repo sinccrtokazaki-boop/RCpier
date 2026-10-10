@@ -4,6 +4,8 @@
             バイリニア骨格の材端ばね。N は長期荷重時の値で固定
             ヒンジ位置: 杭頭、仮想固定点（仮想固定点モデル）/ 海底面と地中部の分割点（地盤ばねモデル、
             海底面から inground_depth/β の深さまで）
+            部位ごとの腐食（pile_hinge.corrosion、利用可否の劣化シナリオ）: ヒンジの高さで 杭頭側（boundary 以上）・
+            海中部（海底面以上）・地中部 に分け、その部位の外面の腐食量の断面で Mp・M–φ を求める
     地盤ばね: 上限 pu（入力）があれば弾完全塑性（hinge.EPSpring）、なければ線形
     上部工の梁: 弾性。要求点で梁の曲げが Mu（示方書、材料係数 1.0）以下かを確認
     載荷: 長期荷重（level2.gravity）の後、上部工の重心に水平力 W（荷重係数 = 換算震度 kh）を比例増加
@@ -12,7 +14,7 @@
 要求側と判定基準は入力（港湾基準の規定はプログラム作成者が確定できないため）。単位: mm, N
 """
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -30,6 +32,28 @@ VERIFY_ITEMS = [
     "海底面の位置のヒンジを地中部として扱うこと",
     "ファイバーの M–φ からヒンジを作る方法（最初の降伏 My で降伏、θu = (φu − φy)·Lp で Mu、局部座屈後の耐力低下は無視）",
 ]
+
+
+CORROSION_ZONES = {"head": "杭頭側（飛沫帯・干満帯）", "sea": "海中部", "soil": "地中部"}
+T_MIN = 1.0                       # 腐食量が板厚に達したときに残す板厚 [mm]（開孔として注意を出す）
+
+
+def corrosion_zone(z, seabed, boundary):
+    """高さ z [mm] の腐食の部位: "head"（boundary 以上）/ "sea"（海底面以上）/ "soil"（海底面より下）"""
+    if z >= boundary:
+        return "head"
+    return "sea" if z >= seabed - 1.0 else "soil"
+
+
+def corroded_section(sec, outer):
+    """外面の腐食量を outer [mm] とした鋼管断面（内面はもとの値、剛性の扱いも同じ）と注意（なければ None）。
+    腐食量が板厚に達するときは板厚を T_MIN 残す（開孔）"""
+    lim = sec.t - sec.corrosion_inner - T_MIN
+    warn = None
+    if outer > lim:
+        warn = f"外面の腐食量 {outer:.1f} mm が板厚 {sec.t:g} mm に達するため、残りの板厚を {T_MIN:g} mm とします（開孔）"
+        outer = lim
+    return replace(sec, corrosion_outer=max(float(outer), 0.0)), warn
 
 
 def pipe_mp(sec, fy, N):
@@ -154,12 +178,15 @@ def pile_capacity(sec, mat, N, opt):
 def build_pile_hinges(pier, rG, plane, r, depth_factor, hinge_opt=None, caps=None):
     """杭の塑性ヒンジ {(eid, 面, 端): Hinge}、ラベル、種類（杭頭 / 地中部）
 
-    hinge_opt: level2.pile_hinge。model = fiber なら M–φ からヒンジを作り、caps に PileCapacity を入れる
+    hinge_opt: level2.pile_hinge。model = fiber なら M–φ からヒンジを作り、caps に PileCapacity を入れる。
+        corrosion = {head, sea, soil: 外面の腐食量 [mm]（省略した部位は断面の値）, boundary: 杭頭側の下端 z [mm]}
+        があれば、ヒンジの高さの部位の腐食量で Mp・M–φ を求める（剛性はもとの断面のまま）
     """
     m = pier.model
     hinges, labels, kinds, warns = {}, {}, {}, []
     soil = pier.pile_model == "soil_spring"
     fiber = hinge_opt is not None and hinge_opt["model"] == "fiber"
+    corr = (hinge_opt or {}).get("corrosion")
     cache = {}
     for (i, j), p in sorted(pier.piles.items(), key=lambda kv: kv[1]["eid"]):
         sec, mat = pier.pile_sec[(i, j)]
@@ -167,7 +194,8 @@ def build_pile_hinges(pier, rG, plane, r, depth_factor, hinge_opt=None, caps=Non
         EI = mat.E * (sec.Iz if plane == 0 else sec.Iy)
         Lref = p["free_length"] + (1 / p["beta"] if soil else 0.0)     # 等価な片持ち長さ
         K0 = member_end_stiffness(EI, mat.G * sec.Asy, Lref)
-        pos = [(p["eid"], 1, "杭頭", "杭頭"), (p["eid"], 0, "地中部", "海底面" if soil else "仮想固定点")]
+        pos = [(p["eid"], 1, "杭頭", "杭頭", pier.z_soffit),
+               (p["eid"], 0, "地中部", "海底面" if soil else "仮想固定点", p["seabed"] if soil else p["z_fix"])]
         if soil:
             for k, sid in enumerate(p.get("segments", [])):
                 if k == 0:
@@ -175,19 +203,27 @@ def build_pile_hinges(pier, rG, plane, r, depth_factor, hinge_opt=None, caps=Non
                 z_top = p["ground"][k][1]
                 if p["seabed"] - z_top > depth_factor / p["beta"] + 1e-6:
                     break
-                pos.append((sid, 1, "地中部", f"地中 z={z_top / 1e3:.2f}"))
-        for eid, end, kind, where in pos:
+                pos.append((sid, 1, "地中部", f"地中 z={z_top / 1e3:.2f}", z_top))
+        for eid, end, kind, where, z in pos:
             f = rG.forces[eid]["face"]
             N = f[0] if end == 0 else -f[6]                           # 圧縮正
             key = (eid, plane, end)
+            s = sec                                                   # ヒンジの位置の断面（部位ごとの腐食）
+            if corr:
+                zone = corrosion_zone(z, p["seabed"], corr["boundary"])
+                if corr.get(zone) is not None:
+                    s, w = corroded_section(sec, corr[zone])
+                    w = w and f"杭 {sec.name} {CORROSION_ZONES[zone]}: {w}"
+                    if w and w not in warns:
+                        warns.append(w)
             if fiber:
                 # 軸力は降伏軸力の 0.5% 刻みに丸めて M–φ を共有する（計算時間の短縮）
-                Do, Di = sec.dims(corroded=True)
+                Do, Di = s.dims(corroded=True)
                 dN = 0.005 * math.pi * (Do ** 2 - Di ** 2) / 4 * mat.fy
                 Nq = round(N / dN) * dN
-                ck = (id(sec), id(mat), Nq)
+                ck = (sec.name, Do, Di, id(mat), Nq)
                 if ck not in cache:
-                    cache[ck] = pile_capacity(sec, mat, Nq, hinge_opt)
+                    cache[ck] = pile_capacity(s, mat, Nq, hinge_opt)
                     for w in cache[ck][1]:
                         if f"杭 {sec.name}: {w}" not in warns:
                             warns.append(f"杭 {sec.name}: {w}")
@@ -200,10 +236,10 @@ def build_pile_hinges(pier, rG, plane, r, depth_factor, hinge_opt=None, caps=Non
                 if caps is not None:
                     caps[key] = cap
             else:
-                Mp = pipe_mp(sec, mat.fy, N)
+                Mp = pipe_mp(s, mat.fy, N)
                 if Mp <= 0:
                     warns.append(f"杭 {tag} {where}: 長期軸力が降伏軸力以上のため Mp を微小値とします")
-                    Mp = 1e-3 * pipe_mp(sec, mat.fy, 0.0)
+                    Mp = 1e-3 * pipe_mp(s, mat.fy, 0.0)
                 sk = Skeleton.from_member(Mp, Mp, 0.5, K0, r)
             if fiber:
                 hinges[key] = BilinearHinge(sk, cap.theta_u, r * K0)
@@ -287,9 +323,11 @@ def run_level2(pier, direction="+y", results=None):
     return out
 
 
-def deck_sections(pier):
+def deck_sections(pier, rebar_loss=None):
     """上部工の梁の照査断面（杭の前面・中央）と曲げ耐力 Mu（示方書、材料係数 1.0）
+    rebar_loss: 主筋の断面欠損率 (下端, 上端)（鉄筋の腐食、利用可否の劣化シナリオ）。全ての梁に一律
     戻り値: [dict(eid, x, Mu_pos, Mu_neg, label)]。M ≧ 0（deck_moment の符号）は上端圧縮"""
+    lb, lt = rebar_loss or (0.0, 0.0)
     m = pier.model
     out = []
     pile_at = {pier.node_ids[ij]: sec for ij, (sec, _) in pier.pile_sec.items()}
@@ -303,8 +341,9 @@ def deck_sections(pier):
         ri = pile_at[e.ni].D / 2 if e.ni in pile_at else 0.0
         rj = pile_at[e.nj].D / 2 if e.nj in pile_at else 0.0
         for x, bars in ((ri, rb.end), (e.L / 2, rb.center), (e.L - rj, rb.end)):
-            mu = {sg: jsce_mu(s.b, s.D, c.area, tn.area, rb.dt, rb.dt, e.mat.fck, rb.main.F, rb.main.F)
-                  for sg, c, tn in ((1, bars.top, bars.bottom), (-1, bars.bottom, bars.top))}
+            At, Ab = bars.top.area * (1 - lt), bars.bottom.area * (1 - lb)
+            mu = {sg: jsce_mu(s.b, s.D, c, tn, rb.dt, rb.dt, e.mat.fck, rb.main.F, rb.main.F)
+                  for sg, c, tn in ((1, At, Ab), (-1, Ab, At))}
             out.append(dict(eid=eid, x=x, Mu_pos=mu[1], Mu_neg=mu[-1], label=pier.label("elem", eid)))
     return out
 

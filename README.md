@@ -604,6 +604,26 @@ python docs/make_henjo_rensa.py [公開ページ用 HTML]    # → docs/変状�
 作図は rcframe/chain_draw.py（データを引数で受け取る。列を飛ばす矢印は箱のすき間を通す）。印「計」は利用可否シナリオで
 計算している箇所
 
+**変状連鎖の重点シナリオの確率評価（D1〜D5、各段階はユーザー承認後に着手）**
+D1 済: 劣化の変数 → D2: 劣化のモデル（年数・確率分布）→ D3: 土留部・渡版の判定 → D4: 川崎港の計算 → D5: 報告
+```yaml
+scenarios:                          # 劣化の変数（grid・base・distributions に書ける）
+  base:
+    rebar_loss_bottom: 0.1          # 上部工の梁の下端の主筋の断面欠損率（上端は rebar_loss_top）→ 許容荷重の Mu
+    corrosion_head: 3.0             # 杭の外面の腐食量 [mm]: 杭頭側（corrosion_boundary 以上）
+    corrosion_sea: 2.0              #   海中部（海底面以上。海底面のヒンジを含む）
+    corrosion_soil: 1.0             #   地中部。省略した部位は断面の腐食代のまま
+    corrosion_boundary: -1.0        # 杭頭側の下端の標高 [m]（既定 −1.0 = L.W.L. − 1 m）
+    scour: 0.5                      # 洗掘による海底面の低下 [m]（列ごとの dict、または scour_ratio で列ごとの比）
+    scour_ratio: {S: 1.0, C1: 0.5}
+```
+- 梁の主筋の欠損は Mu（許容荷重の限界）だけに効く（梁は弾性、剛性は変えない）。全ての梁に一律
+- 杭の腐食はヒンジの高さの部位の断面で Mp(N)・M–φ を求める（剛性はもとの断面）。腐食量が板厚に達すると
+  残り 1 mm として開孔の注意を出し、結果の列 perforation を立てる
+- 洗掘は海底面（piles.rows.*.seabed）を下げた入力で Pier を作り直す（自由長が増え、上の層が薄くなる）
+- テスト（tests/test_deterioration.py）: 下端筋の欠損で Mu = 手計算 As·fy·(d − a/2)、部位ごとのヒンジ = 一様な腐食の
+  断面のヒンジ・手計算 Mp(N)、洗掘で自由長が増える、一括実行で洗掘により変位が増え欠損により許容荷重が下がる
+
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。
 式A と式B の値の差は基準の原文で確認中（fiber.VERIFY_ITEMS）。既定は式A

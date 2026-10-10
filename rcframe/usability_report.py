@@ -54,7 +54,12 @@ CHECKS = [
 COLUMN_DOC = {
     "id": "シナリオの id（変数の値から決まるハッシュ）", "tier": "screen（ふるい分け）/ refine（詳細化）",
     "surface": "海底面の地盤変位 [m]（surface_ratio があれば海側の列の値）", "depth": "流動層の厚さ H [m]", "bottom": "流動層の下端の標高 [m]",
-    "kh": "慣性力の換算震度", "ecu": "局部座屈ひずみの式", "reached": "打ち切り変位に達せず全段階を載荷できた",
+    "kh": "慣性力の換算震度", "ecu": "局部座屈ひずみの式",
+    "rebar_loss_bottom": "梁の下端の主筋の断面欠損率", "rebar_loss_top": "梁の上端の主筋の断面欠損率",
+    "corrosion_head": "杭頭側の外面の腐食量 [mm]", "corrosion_sea": "海中部の外面の腐食量 [mm]",
+    "corrosion_soil": "地中部の外面の腐食量 [mm]", "scour": "洗掘による海底面の低下 [m]",
+    "perforation": "腐食量が板厚に達したヒンジがある（開孔）",
+    "reached": "打ち切り変位に達せず全段階を載荷できた",
     "deck_peak": "上部工の最大変位 [m]", "deck_residual": "上部工の残留変位 [m]（流動方向を正）",
     "deck_rot": "上部工の平面の残留回転 [rad]", "head_rot_max": "杭頭の塑性回転角の最大 [rad]",
     "head_rot_res": "杭頭の塑性回転角の残留 [rad]", "inground_rot_max": "地中部の塑性回転角の最大 [rad]",

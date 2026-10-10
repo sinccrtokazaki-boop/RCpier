@@ -303,13 +303,14 @@ def index_html(name, rows, opts, cards):
 # ============================================================ 書き出し
 def card_one(data, sid, params, tier, segments, row):
     """シナリオを解析し直してカードの HTML を返す（子プロセスでも動く）。戻り値: (HTML, 解析し直した行)"""
-    from .port_batch import _summary, analyze
+    from .port_batch import _summary, analyze, usability_opts
     from .port_usability import judge, usability_row
     pier, fr = analyze(data, sid, params, tier, segments)
     again = _summary(fr, sid, tier, params, 0.0)
     if pier.usability:
-        again.update(usability_row(pier, fr, pier.usability))
-        again["status"], rs = judge(again, pier.usability)
+        opts = usability_opts(pier, params)
+        again.update(usability_row(pier, fr, opts))
+        again["status"], rs = judge(again, opts)
         again["reasons"] = " / ".join(rs)
     return card_html(pier, {**row, **again}, fr, pier.usability, params), again
 

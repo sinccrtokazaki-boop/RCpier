@@ -230,7 +230,7 @@ def allowable_loads(pier, fr, opts):
         base = {c: 1.0 for c in fr.gravity if c not in removed}
         snap = inc.snapshot()
         cases = _unit_cases(pier, opts)
-        secs = deck_sections(pier) if opts["deck_mu"] else []
+        secs = deck_sections(pier, opts.get("rebar_loss")) if opts["deck_mu"] else []
         piles = []
         if opts["pile_axial"]:
             for (i, j), p in pier.piles.items():

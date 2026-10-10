@@ -49,6 +49,8 @@ RC造の3次元フレーム解析システム（Python）。実務の設計補�
 - `rcframe/usability_report.py`: 利用可否シナリオの検討報告書（HTML、report.assemble_html）。`port_batch --report 報告書.html`
 - `rcframe/port_cards.py`: 判定カードと一覧の HTML（write_cards、report.CSS と svg を使う）。`port_batch --cards フォルダ`
 - `rcframe/port_batch.py`: シナリオの一括実行（Batch、2段階、並列、JSON Lines で再開）。`python -m rcframe.port_batch 入力.yaml -j 4`
+  - 劣化の変数 DET_KEYS（梁の主筋の断面欠損率、杭の部位ごとの腐食量、洗掘）は read_deterioration で読み、
+    analyze（洗掘 → 入力の海底面、腐食 → ヒンジの corrosion）と usability_opts（欠損 → deck_sections）で使う
 - `rcframe/port_flow.py` : 側方流動のシナリオ（FlowCase、run_flow）。地盤変位は Incremental.run の ground（等価節点力 k·Δug）
 - `rcframe/pier_report.py`: 桟橋の計算書（章立て SECTIONS）。report.assemble_html・viewer_html を共通に使う。
   report.build_report / write_report は Pier を自動で振り分ける
@@ -85,6 +87,10 @@ P1 済: モデル生成（仮想固定点）→ P2 済: 荷重・組合せ → P
 ## 利用可否シナリオのロードマップ（README.md 参照、直杭式横桟橋のみ、各段階はユーザー承認後に着手）
 U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位入力（側方流動）→ U3 済: ファイバー M–φ
 → U4 済: 一括実行（2段階）→ U5 済: 判定・許容荷重・超過確率 → U6 済: 判定カード（HTML）
+
+## 変状連鎖の重点シナリオの確率評価（README.md 参照、各段階はユーザー承認後に着手）
+D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、洗掘）→ D2: 劣化のモデル（年数・確率分布）
+→ D3: 土留部・渡版の判定（後処理）→ D4: 川崎港の計算（40・60 年 × 常時・L1・L2）→ D5: 報告
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用

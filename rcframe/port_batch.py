@@ -8,6 +8,11 @@
               対象は refine.when の条件（杭の降伏、上部工の残留変位の範囲）に当てはまるシナリオ
     並列実行（concurrent.futures.ProcessPoolExecutor、workers）。結果は 1シナリオ 1行の JSON Lines に
     逐次追記し、再実行時は計算済み（同じ id・段階）を飛ばす。CSV にも書き出す
+    劣化の変数（DET_KEYS、変状連鎖の重点シナリオ）:
+        rebar_loss_bottom / rebar_loss_top : 上部工の梁の主筋の断面欠損率（下端・上端、0〜1）→ 許容荷重の Mu
+        corrosion_head / sea / soil        : 杭の外面の腐食量 [mm]（杭頭側・海中部・地中部）→ ヒンジの Mp・M–φ
+        corrosion_boundary                 : 杭頭側の下端の標高 [m]（既定 −1.0 = L.W.L. − 1 m、L.W.L. ±0）
+        scour（+ scour_ratio）             : 洗掘による海底面の低下 [m]（列ごと、またはスカラー × 列ごとの比）
 
 使い方: python -m rcframe.port_batch 入力.yaml -o 出力の名前（.jsonl と .csv）[-j 並列数]
         [--cards フォルダ [--cards-all]]（判定カードと一覧 index.html、port_cards）
@@ -36,10 +41,13 @@ from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
 from .port_usability import judge, usability_row
 
 M = 1e3
-PARAMS = FLOW_KEYS + ("ecu", "surface_ratio")       # シナリオの変数（grid・base に書ける）
+DET_KEYS = ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil",
+            "corrosion_boundary", "scour", "scour_ratio")
+PARAMS = FLOW_KEYS + ("ecu", "surface_ratio") + DET_KEYS      # シナリオの変数（grid・base に書ける）
 COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
+           "rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil", "scour",
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
-           "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain",
+           "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain", "perforation",
            "soil_yield", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
            "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds"]
 DISTS = ("lognormal", "normal", "uniform", "choice")
@@ -148,10 +156,67 @@ def scenario_id(params):
     return "S" + hashlib.sha1(s.encode("utf-8")).hexdigest()[:10]
 
 
+def row_names(data):
+    """入力 data の杭の列の名前"""
+    return [str(k) for k in data["piles"]["rows"]]
+
+
+def read_deterioration(params, rows):
+    """シナリオの変数のうち劣化の変数（DET_KEYS）を読む。rows: 杭の列の名前
+    戻り値: dict(rebar_loss=(下端, 上端) or None, corrosion={head, sea, soil [mm], boundary [mm]} or None,
+                 scour={列の名前: 低下量 [m]} or None)"""
+    p = params
+    rl = None
+    if "rebar_loss_bottom" in p or "rebar_loss_top" in p:
+        rl = tuple(_num(p.get(k, 0.0), k) for k in ("rebar_loss_bottom", "rebar_loss_top"))
+        if not all(0 <= v < 1 for v in rl):
+            raise InputError("rebar_loss_bottom / rebar_loss_top: 断面欠損率は 0 以上 1 未満です")
+    zones = {z: _num(p[f"corrosion_{z}"], f"corrosion_{z}") for z in ("head", "sea", "soil") if f"corrosion_{z}" in p}
+    corr = None
+    if zones:
+        if any(v < 0 for v in zones.values()):
+            raise InputError("corrosion_head / sea / soil: 腐食量は 0 以上です")
+        corr = {**zones, "boundary": _num(p.get("corrosion_boundary", -1.0), "corrosion_boundary") * M}
+    elif "corrosion_boundary" in p:
+        raise InputError("corrosion_boundary は corrosion_head・corrosion_sea・corrosion_soil と一緒に指定します")
+    sc = None
+    s, ratio = p.get("scour"), p.get("scour_ratio")
+    if s is not None:
+        if isinstance(s, dict):
+            sc = {str(k): _num(v, f"scour.{k}") for k, v in s.items()}
+        elif ratio is not None:
+            sc = {str(k): _num(s, "scour") * _num(v, f"scour_ratio.{k}") for k, v in ratio.items()}
+        else:
+            sc = {r: _num(s, "scour") for r in rows}
+        bad = sorted(set(sc) - set(rows))
+        if bad:
+            raise InputError(f"scour: 杭の列にない名前です: {bad}")
+        if any(v < 0 for v in sc.values()):
+            raise InputError("scour: 海底面の低下量は 0 以上です")
+    elif ratio is not None:
+        raise InputError("scour_ratio は scour（スカラー）と一緒に指定します")
+    return dict(rebar_loss=rl, corrosion=corr, scour=sc)
+
+
+def apply_scour(data, scour):
+    """杭の列の海底面（piles.rows.*.seabed）を scour [m] だけ下げた入力の複製"""
+    d = copy.deepcopy(data)
+    rows = d["piles"]["rows"]
+    for k in rows:
+        s = scour.get(str(k), 0.0)
+        if s:
+            row = dict(rows[k])
+            row["seabed"] = _num(row["seabed"], f"piles.rows.{k}.seabed") - s
+            if "tip" in row and row["seabed"] <= _num(row["tip"], f"piles.rows.{k}.tip"):
+                raise InputError(f"scour: 列 {k} の海底面が杭先端より下になります")
+            rows[k] = row
+    return d
+
+
 def to_flow_case(pier, params, name):
-    """シナリオの変数（YAML の単位）を FlowCase と ecu の設定に変換する。
+    """シナリオの変数（YAML の単位）を FlowCase と ecu の設定に変換する（劣化の変数は除く）。
     surface がスカラーで surface_ratio（列ごとの比）があれば、列ごとの値 = surface × 比"""
-    p = dict(params)
+    p = {k: v for k, v in params.items() if k not in DET_KEYS}
     ecu = p.pop("ecu", "A")
     ratio = p.pop("surface_ratio", None)
     if ratio is not None and not isinstance(p.get("surface"), dict):
@@ -165,6 +230,7 @@ def to_flow_case(pier, params, name):
 
 # ============================================================ 1シナリオの計算（子プロセスでも動く）
 _PIERS = {}
+_PIERS_MAX = 6                    # キャッシュする Pier の数（洗掘のシナリオは海底面ごとに Pier が変わる）
 
 
 def _pier(data, segment, model):
@@ -172,6 +238,8 @@ def _pier(data, segment, model):
     from .pier import Pier
     key = (hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest(), segment, model)
     if key not in _PIERS:
+        while len(_PIERS) >= _PIERS_MAX:
+            _PIERS.pop(next(iter(_PIERS)))
         d = copy.deepcopy(data)
         d.pop("scenarios", None)
         d.pop("lateral_flow", None)
@@ -189,25 +257,34 @@ def _summary(r, sid, tier, params, seconds):
     ing, ing_r = r.max_rotation("地中部"), r.max_rotation("地中部", residual=True)
     dm = r.damage()
     surf = params.get("surface")
+    sc = params.get("scour")
     return {
         "id": sid, "tier": tier, "direction": c.direction,
         "surface": surf if not isinstance(surf, dict) else json.dumps(surf, ensure_ascii=False),
         "depth": c.depth / M if c.bottom is None else None, "bottom": None if c.bottom is None else c.bottom / M,
         "shape": c.shape, "kh_factor": c.kh_factor, "pu_factor": c.pu_factor,
         "kh": c.kh, "order": c.order, "ecu": str(params.get("ecu", "A")),
+        **{k: params.get(k) for k in ("rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea",
+                                      "corrosion_soil")},
+        "scour": sc if not isinstance(sc, dict) else json.dumps(sc, ensure_ascii=False),
         "reached": r.reached, "deck_peak": r.deck["peak"] / M, "deck_residual": r.deck["residual"] / M,
         "deck_rot": r.deck["rot_residual"], "head_rot_max": head[0], "head_rot_res": head_r[0],
         "inground_rot_max": ing[0], "inground_rot_res": ing_r[0], "n_yield": len(r.yielded),
         "n_buckled": sum(x["level"] == "局部座屈" for x in dm) if dm else None,
         "n_plastic": sum(x["level"] == "塑性化" for x in dm) if dm else None,
         "max_strain": max((x["strain"] for x in dm), default=None) if dm else None,
+        "perforation": any("開孔" in w for w in r.warnings),
         "soil_yield": sum(s.yielded for s in r.soil.values()), "refine_reason": "",
         "seconds": round(seconds, 2),
     }
 
 
 def analyze(data, sid, params, tier, segments):
-    """1シナリオの解析。戻り値: (Pier, FlowResult)。tier = "screen"（粗い分割・cos 式）/ "refine"（入力の分割・ファイバー）"""
+    """1シナリオの解析。戻り値: (Pier, FlowResult)。tier = "screen"（粗い分割・cos 式）/ "refine"（入力の分割・ファイバー）
+    劣化の変数: 洗掘は海底面を下げた入力で Pier を作り、杭の腐食はヒンジの設定（corrosion）で与える"""
+    det = read_deterioration(params, row_names(data))
+    if det["scour"]:
+        data = apply_scour(data, det["scour"])
     ground = any(v != 0 for v in _surface_values(params))
     if tier == "screen":
         model = "soil_spring" if ground else "fixed_point"
@@ -220,7 +297,16 @@ def analyze(data, sid, params, tier, segments):
     case, ecu = to_flow_case(pier, params, sid)
     if tier == "refine":
         hinge["ecu"] = ecu
+    hinge["corrosion"] = det["corrosion"]
     return pier, run_flow(pier, case, hinge_opt=hinge)
+
+
+def usability_opts(pier, params):
+    """利用可否の判定・許容荷重の設定（pier.usability）に、シナリオの劣化の変数（梁の主筋の断面欠損）を加えたもの"""
+    if not pier.usability:
+        return None
+    det = read_deterioration(params, [pier.gy[j][0] for j in pier.pile_rows])
+    return {**pier.usability, "rebar_loss": det["rebar_loss"]}
 
 
 def run_one(data, sid, params, tier, segments):
@@ -229,8 +315,9 @@ def run_one(data, sid, params, tier, segments):
     pier, r = analyze(data, sid, params, tier, segments)
     row = _summary(r, sid, tier, params, time.time() - t0)
     if pier.usability:                                   # 許容荷重と判定（U5）
-        row.update(usability_row(pier, r, pier.usability))
-        row["status"], reasons = judge(row, pier.usability)
+        opts = usability_opts(pier, params)
+        row.update(usability_row(pier, r, opts))
+        row["status"], reasons = judge(row, opts)
         row["reasons"] = " / ".join(reasons)
         row["seconds"] = round(time.time() - t0, 2)
     return row
@@ -278,6 +365,9 @@ class Batch:
         for params in scenario_params(self.cfg):
             sid = scenario_id(params)
             to_flow_case(self.pier, params, sid)            # 入力の誤りをここで検出
+            det = read_deterioration(params, row_names(data))
+            if det["scour"]:
+                apply_scour(data, det["scour"])
             self.scenarios.append((sid, params))
         seg = self.cfg["refine"]["segment"]
         self.segments = {"screen": self.cfg["screening"]["segment"],
