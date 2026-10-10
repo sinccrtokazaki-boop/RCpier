@@ -22,7 +22,7 @@ import numpy as np
 
 from .grid import InputError, _check_keys, _num
 from .hinge import EPSpring
-from .port_level2 import build_pile_hinges, inertia_pattern, pile_damage
+from .port_level2 import build_pile_hinges, deck_moment, inertia_pattern, pile_damage
 from .pushover import Incremental, Level, _parse_direction
 from .results import Result
 
@@ -174,6 +174,63 @@ class FlowResult:
             s = max(res.hinge_theta, key=lambda st: (abs(res.hinge_theta[st][k]), abs(res.hinge_M[st][k])))
             th[k], mm[k] = res.hinge_theta[s][k], res.hinge_M[s][k]
         return pile_damage(self.caps, h, self.labels, self.kinds, th, mm)
+
+    # ---------------------------------------- 本震時の記録（ガイドライン 表 D-5 の本震時の条件、G1）
+    def _faces(self, residual=False):
+        """可撓部端の材端力 {eid: 12成分} のリスト。既定: 本震の履歴（長期の載荷を終えてから最後の段階まで）、
+        residual: 最終状態。許容荷重の載荷（port_usability）で増えたステップは含めない"""
+        if not self.phases:
+            return []
+        st = self.inc.res.states
+        s0, s1 = self.phases[0][1], self.phases[-1][1]
+        if residual:
+            return [st[s1][1]] if s1 in st else []
+        return [st[s][1] for s in sorted(st) if s0 <= s <= s1]
+
+    def deck_ratio(self, pier, secs, residual=False):
+        """上部工の梁の |M|/Mu の最大とラベル（secs: port_level2.deck_sections）。断面がなければ (None, "")
+        M = (My_i + x·Fz_i)（i端の材端力）+ 長期の部材荷重の項（results.section_forces_at と同じ釣合い）"""
+        if not secs or not self.phases:
+            return None, ""
+        zero = {s["eid"]: {"face": np.zeros(12), "node": np.zeros(12)} for s in secs}
+        r0 = Result(pier.model, "部材荷重", {}, zero, {}, {c: 1.0 for c in self.gravity})
+        const = [deck_moment(r0, s) for s in secs]                # 部材荷重による項（材端力 0 のとき）
+        best = (0.0, "")
+        for face in self._faces(residual):
+            for s, c in zip(secs, const):
+                f = face[s["eid"]]
+                Mx = f[4] + s["x"] * f[2] + c
+                ratio = Mx / s["Mu_pos"] if Mx >= 0 else -Mx / s["Mu_neg"]
+                if ratio > best[0]:
+                    best = (ratio, s["label"])
+        return best
+
+    def pile_axial_ratio(self, pier, residual=False):
+        """杭の軸力 / 設計支持力（押込み Rcd、引抜き Rtd: piles.rows の入力値）の最大とラベル。
+        軸力は杭の最下部の要素の i端（圧縮正）。支持力の入力がなければ (None, "")"""
+        items = []
+        for (i, j), p in pier.piles.items():
+            cap = pier.pile_capacity.get(j)
+            if cap:
+                items.append((p["elements"][-1], cap[0], cap[1], f"杭 {pier.gx[i][0]}/{pier.gy[j][0]}"))
+        if not items or not self.phases:
+            return None, ""
+        best = (0.0, "")
+        for face in self._faces(residual):
+            for eid, Rcd, Rtd, label in items:
+                C = face[eid][0]
+                for ratio, what in ((C / Rcd if Rcd else 0.0, "押込み"), (-C / Rtd if Rtd else 0.0, "引抜き")):
+                    if ratio > best[0]:
+                        best = (ratio, f"{label}（{what}）")
+        return best
+
+    def residual_moment_ratio(self):
+        """杭のヒンジの残留モーメント |M| / My の最大とラベル（ガイドライン 5.4: 残留応力が降伏応力を下回るか）"""
+        h = self.inc.hinges
+        if not h:
+            return None, ""
+        k = max(h, key=lambda k: abs(h[k].M) / h[k].My)
+        return abs(h[k].M) / h[k].My, self.labels[k]
 
     def print(self):
         c = self.case

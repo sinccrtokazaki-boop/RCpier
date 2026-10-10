@@ -94,6 +94,11 @@ U1 済: 除荷・状態の引き継ぎ・変位制御 → U2 済: 地盤変位�
 D1 済: 劣化の変数（梁の主筋の欠損、杭の部位ごとの腐食、洗掘）→ D2 済: 劣化のモデル（port_deterioration.py、scenarios.deterioration）
 → D3 済: 土留部・渡版の判定（後処理、usability.retaining・limits.bridge_opening/apron_step）→ D4 済: 川崎港の計算（examples/kawasaki_deterioration.py）→ D5 済: 報告書（deterioration_report.py）
 
+## ガイドライン（港湾施設の利用可否判断に係るガイドライン 第2版、令和8年5月）に合わせる変更（README.md 参照、各段階はユーザー承認後に着手）
+G1 済: 本震時の記録（FlowResult.deck_ratio・pile_axial_ratio・residual_moment_ratio、列 deck_mu_max/res・pile_axial_max・pile_m_res・n_buckled_head、
+limits.deck_mu・pile_axial・pile_damage.杭頭の局部座屈）→ G2: 余震の照査（本震後に L1 の震度を漸増）→ G3: 利用方法ごとの判定（表 D-5、
+区分 利用可／利用可（注意事項あり）／利用不可）→ G4: 再計算と報告書（図 D-8・D-9 相当、残留水平変位の閾値、表 A-1 の目安との比較）
+
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
 - 柱梁接合部変形、壁・ブレースは未対応

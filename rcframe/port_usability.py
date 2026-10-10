@@ -12,6 +12,11 @@
     ケース（既定 Ls）は利用時の荷重に置き換えるため、先に取り除く
 判定（usability.limits）: 上部工の残留変位、杭の残留の塑性回転角、杭の損傷の程度、許容荷重と必要な荷重
     から「利用可 / 制限付き利用 / 利用不可」を決め、最も厳しいものをとる
+    本震時の条件（港湾施設の利用可否判断に係るガイドライン 第2版 表 D-5、G1）:
+        deck_mu    : 本震の履歴中に上部工の梁が Mu（設計断面耐力）に達した → 既定 unusable
+        pile_axial : 本震の履歴中に杭の軸力が設計支持力に達した → 既定 limited（フェーズ 1 は特性値以下でよいため）
+        pile_damage の 杭頭の局部座屈: 杭頭の限界曲率の超過（既定は 局部座屈 と同じ。港空研資料 No.1429 で
+                     杭頭は一定程度の超過を許容できる可能性が示されている）
 土留部と渡版（後処理、変状連鎖の重点シナリオ D3。土留部はモデル化しない）:
     土留部の海側への移動 δw = wall_ratio × 土留部の列（usability.retaining.row、既定は海底面の最も高い列）の
     海底面の地盤変位。背後の沈下 s = settlement、または settlement_ratio × δw
@@ -38,6 +43,7 @@ LOADS = ("surcharge", "berthing", "tractive")
 LOAD_NAME = {"surcharge": "上載荷重", "berthing": "接岸力", "tractive": "牽引力"}
 LOAD_UNIT = {"surcharge": "kN/m²", "berthing": "kN", "tractive": "kN"}
 STATUS = ("利用可", "制限付き利用", "利用不可")
+LEVELS = ("ok", "limited", "unusable")                                    # 判定の項目ごとの設定 → STATUS の番号
 RETAIN_LIMITS = ("bridge_opening", "bridge_closing", "apron_step")     # 土留部と渡版の閾値 [m]
 RETAIN_KEYS = ("wall_ratio", "settlement", "settlement_ratio")           # シナリオの変数
 VERIFY_ITEMS = [
@@ -63,7 +69,8 @@ def read_usability(pier, d):
         return None
     _check_keys(d, ("limits", "required", "allowable", "remove", "retaining"), "usability")
     lim = d.get("limits") or {}
-    _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage") + RETAIN_LIMITS, "usability.limits")
+    _check_keys(lim, ("residual_displacement", "pile_rotation", "pile_damage", "deck_mu", "pile_axial") + RETAIN_LIMITS,
+                "usability.limits")
     limits = {}
     for k in ("residual_displacement",) + RETAIN_LIMITS:          # 長さの閾値 [m] → [mm]
         if k in lim:
@@ -71,12 +78,19 @@ def read_usability(pier, d):
             limits[k] = (lo * M, hi * M)
     if "pile_rotation" in lim:
         limits["pile_rotation"] = _levels(lim["pile_rotation"], "usability.limits.pile_rotation")
-    pd = lim.get("pile_damage", {"塑性化": "limited", "局部座屈": "unusable"})
-    _check_keys(pd, ("塑性化", "局部座屈"), "usability.limits.pile_damage")
+    pd = lim.get("pile_damage") or {}
+    _check_keys(pd, ("塑性化", "局部座屈", "杭頭の局部座屈"), "usability.limits.pile_damage")
+    pd = {"塑性化": "limited", "局部座屈": "unusable", **pd}
+    pd.setdefault("杭頭の局部座屈", pd["局部座屈"])
     for k, v in pd.items():
-        if v not in ("ok", "limited", "unusable"):
+        if v not in LEVELS:
             raise InputError(f"usability.limits.pile_damage.{k}: ok / limited / unusable です")
-    limits["pile_damage"] = dict(pd)
+    limits["pile_damage"] = pd
+    for k, dflt in (("deck_mu", "unusable"), ("pile_axial", "limited")):          # 本震時の条件（表 D-5）
+        v = str(lim.get(k, dflt))
+        if v not in LEVELS:
+            raise InputError(f"usability.limits.{k}: ok / limited / unusable です")
+        limits[k] = v
     req = d.get("required") or {}
     _check_keys(req, LOADS, "usability.required")
     required = {k: _num(v, f"usability.required.{k}") for k, v in req.items()}
@@ -295,13 +309,25 @@ def judge(row, opts):
         lo, hi = lim["pile_rotation"]
         v = max(row.get("head_rot_res") or 0.0, row.get("inground_rot_res") or 0.0)
         up(2 if v >= hi else 1 if v >= lo else 0, f"杭の残留の塑性回転角 {v:.4f} rad")
-    code = {"ok": 0, "limited": 1, "unusable": 2}
+    code = {k: i for i, k in enumerate(LEVELS)}
     pd = lim["pile_damage"]
     if row.get("n_buckled"):
-        up(code[pd["局部座屈"]], f"杭の局部座屈 {row['n_buckled']} 箇所")
+        nh = row.get("n_buckled_head")
+        if nh is None or pd["杭頭の局部座屈"] == pd["局部座屈"]:
+            where = "" if nh is None else f"（杭頭 {nh}、地中部 {row['n_buckled'] - nh}）"
+            up(code[pd["局部座屈"]], f"杭の局部座屈 {row['n_buckled']} 箇所{where}")
+        else:
+            if row["n_buckled"] - nh:
+                up(code[pd["局部座屈"]], f"杭の局部座屈（地中部）{row['n_buckled'] - nh} 箇所")
+            if nh:
+                up(code[pd["杭頭の局部座屈"]], f"杭の局部座屈（杭頭）{nh} 箇所")
     n_pl = row.get("n_plastic") if row.get("n_plastic") is not None else row.get("n_yield", 0)
     if n_pl:
         up(code[pd["塑性化"]], f"杭の塑性化 {n_pl} 箇所")
+    if (row.get("deck_mu_max") or 0) >= 1 and "deck_mu" in lim:
+        up(code[lim["deck_mu"]], f"本震時に上部工の梁が Mu に達した（M/Mu = {row['deck_mu_max']:.2f}）")
+    if (row.get("pile_axial_max") or 0) >= 1 and "pile_axial" in lim:
+        up(code[lim["pile_axial"]], f"本震時に杭の軸力が設計支持力に達した（N/Rd = {row['pile_axial_max']:.2f}）")
     rel = row.get("bridge_rel")
     if rel is not None:
         if "bridge_opening" in lim and rel > 0:

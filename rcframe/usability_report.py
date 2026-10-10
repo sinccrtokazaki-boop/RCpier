@@ -70,6 +70,11 @@ COLUMN_DOC = {
     "inground_rot_res": "地中部の塑性回転角の残留 [rad]", "n_yield": "降伏したヒンジの数",
     "n_buckled": "局部座屈したヒンジの数（詳細化のみ）", "n_plastic": "塑性化したヒンジの数（詳細化のみ）",
     "max_strain": "杭の圧縮縁のひずみの最大（推定、詳細化のみ）", "soil_yield": "上限に達した地盤ばねの数",
+    "n_buckled_head": "局部座屈したヒンジのうち杭頭の数（詳細化のみ）",
+    "deck_mu_max": "本震の履歴中の上部工の梁の M/Mu の最大（主筋の断面欠損を考慮）",
+    "deck_mu_res": "残留状態の上部工の梁の M/Mu の最大",
+    "pile_axial_max": "本震の履歴中の杭の軸力 / 設計支持力（Rcd・Rtd）の最大（支持力の入力があるとき）",
+    "pile_m_res": "杭のヒンジの残留モーメント / My の最大",
     "allow_surcharge": "許容上載荷重 [kN/m²]", "allow_berthing": "許容接岸力 [kN]", "allow_tractive": "許容牽引力 [kN]",
     "status": "判定", "reasons": "判定の理由", "refine_reason": "2段目に回した理由", "seconds": "計算時間 [s]",
 }
@@ -284,8 +289,12 @@ def sec_criteria(pier, ctx):
         lo, hi = lim["pile_rotation"]
         rows.append(["杭の残留の塑性回転角", f"{lo:g} rad 以上", f"{hi:g} rad 以上"])
     pd = lim["pile_damage"]
-    for lv in ("塑性化", "局部座屈"):
-        rows.append([f"杭の{lv}", "あり" if pd.get(lv) == "limited" else "-", "あり" if pd.get(lv) == "unusable" else "-"])
+    for lv in ("塑性化", "局部座屈", "杭頭の局部座屈"):
+        name = "杭頭の局部座屈（限界曲率の超過）" if lv == "杭頭の局部座屈" else f"杭の{lv}"
+        rows.append([name, "あり" if pd.get(lv) == "limited" else "-", "あり" if pd.get(lv) == "unusable" else "-"])
+    for k, name in (("deck_mu", "本震時の上部工の梁の M/Mu"), ("pile_axial", "本震時の杭の軸力 / 設計支持力")):
+        if k in lim:
+            rows.append([name, "1 以上" if lim[k] == "limited" else "-", "1 以上" if lim[k] == "unusable" else "-"])
     rows.append(["許容荷重", "必要な荷重を下回る", "0（載せられない）"])
     out = [table(["項目", "制限付き利用", "利用不可"], rows),
            table(["荷重", "必要な値"], [[LOAD_NAME[k], f"{v:g} {LOAD_UNIT[k]}"] for k, v in opts["required"].items()]),

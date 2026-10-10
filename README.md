@@ -522,7 +522,9 @@ usability:
   limits:                           # 判定基準（計算例は仮の値）
     residual_displacement: {limited: 0.1, unusable: 0.3}    # 上部工の残留水平変位 [m]
     pile_rotation: {limited: 0.005, unusable: 0.02}         # 杭の残留の塑性回転角 [rad]
-    pile_damage: {塑性化: limited, 局部座屈: unusable}
+    pile_damage: {塑性化: limited, 局部座屈: unusable}   # 杭頭の局部座屈 を別に指定できる（既定は 局部座屈 と同じ）
+    deck_mu: unusable               # 本震の履歴中に上部工の梁が Mu に達した（G1、既定 unusable）
+    pile_axial: limited             # 本震の履歴中に杭の軸力が Rcd・Rtd に達した（G1、既定 limited）
   allowable:
     pile: plastic                   # plastic / buckling / none
     deck_mu: true                   # 上部工の梁 |M| ≦ Mu
@@ -690,6 +692,24 @@ python -m rcframe.deterioration_report examples/kawasaki_deterioration [-o 報�
 - 数値はすべて結果の行から求める（条件を変えて計算し直せば作り直せる）。差が標準誤差の 2 倍未満なら「違いはない」と書く
 - テスト（tests/test_deterioration_report.py）: 小さな桟橋の常時・地震後の一括実行から作り、表の確率 = 行の集計、
   外部参照なし、章と変状連鎖図
+
+**ガイドラインに合わせる変更（G1〜G4、各段階はユーザー承認後に着手）**
+港湾施設の利用可否判断に係るガイドライン 第2版（国土交通省港湾局、令和8年5月）の桟橋の考え方（5.4、付録 A の表 A-1・A-7、
+付録 D の表 D-5）に合わせる。残留水平変位は現地で測る指標で、その閾値は解析から利用方法ごとに求める。部材の条件は
+本震時（フェーズ 1: 杭は限界曲率以下、2・3: 降伏以下）・余震時（当面 L1）・利用時（杭は降伏以下）、上部工は常に設計断面耐力以下。
+G1 済: 本震時の記録 → G2: 余震の照査 → G3: 利用方法ごとの判定 → G4: 再計算と報告書
+
+G1 済: 本震時の記録（port_flow.FlowResult の deck_ratio・pile_axial_ratio・residual_moment_ratio）
+- 結果の列: deck_mu_max（本震の履歴中の上部工の梁の M/Mu の最大、主筋の断面欠損を考慮）、deck_mu_res（残留状態）、
+  pile_axial_max（杭の軸力 / 設計支持力 Rcd・Rtd の最大、支持力の入力があるとき）、pile_m_res（杭のヒンジの残留 |M|/My の最大、
+  ガイドライン 5.4 の「残留応力が降伏応力を下回るか」）、n_buckled_head（局部座屈のうち杭頭、2段目）
+- 履歴は長期の載荷を終えてから最後の段階（除荷）までの全ステップ。許容荷重の載荷で増えたステップは含めない
+- 判定: limits.deck_mu（既定 unusable）、limits.pile_axial（既定 limited、フェーズ 1 は特性値以下でよいため）、
+  pile_damage の 杭頭の局部座屈（港空研資料 No.1429 の杭頭の限界曲率の超過の許容を試すため）
+- テスト（tests/test_main_shock.py）: 履歴中・残留の M/Mu = 各状態の材端力から section_forces_at で求めた値の最大、
+  長期だけの軸力比 = 線形解析の長期の軸力 / Rcd、残留 |M|/My = ヒンジの値、判定の設定と入力の誤り、一括実行の列
+- 川崎（L1）の計算し直し: 0 年で仮の閾値により制限付き・不可だった 42 件のうち 9 件は本震時に梁が Mu を超える
+  （M/Mu 最大 1.44）。60 年の局部座屈 48 件のうち 36 件は杭頭だけ
 
 **決定事項**: 鋼管の局部座屈ひずみ εcu は 式A 1.14/(D/t) − 0.012、式B 0.44·t/R − 0.0026、直接入力から選択
 （下限 εy、D/t > 100 で警告）。塑性ヒンジ長 Lp = D（既定）、θu = (φu − φy)·Lp。

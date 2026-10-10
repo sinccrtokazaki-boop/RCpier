@@ -309,7 +309,7 @@ def card_one(data, sid, params, tier, segments, row):
     from .port_batch import _summary, analyze, usability_eval, usability_opts
     from .port_usability import judge
     pier, fr = analyze(data, sid, params, tier, segments)
-    again = _summary(fr, sid, tier, params, 0.0)
+    again = _summary(pier, fr, sid, tier, params, 0.0)
     if pier.usability:
         again.update(usability_eval(pier, fr, params))
         again["status"], rs = judge(again, usability_opts(pier, params))

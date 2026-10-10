@@ -43,6 +43,7 @@ import yaml
 from .grid import InputError, _check_keys, _num
 from . import port_deterioration as det_model
 from .port_flow import KEYS as FLOW_KEYS, read_flow_cases, run_flow
+from .port_level2 import deck_sections
 from .port_usability import RETAIN_KEYS, judge, read_retaining, retaining_row, usability_row
 
 M = 1e3
@@ -52,7 +53,8 @@ PARAMS = FLOW_KEYS + ("ecu", "surface_ratio") + DET_KEYS + RETAIN_KEYS     # シ
 COLUMNS = ["id", "tier", "direction", "surface", "depth", "bottom", "shape", "kh_factor", "pu_factor", "kh", "order", "ecu",
            "age", "t_init", "rebar_loss_bottom", "rebar_loss_top", "corrosion_head", "corrosion_sea", "corrosion_soil", "scour", "wall_ratio",
            "reached", "deck_peak", "deck_residual", "deck_rot", "head_rot_max", "head_rot_res",
-           "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_plastic", "max_strain", "perforation",
+           "inground_rot_max", "inground_rot_res", "n_yield", "n_buckled", "n_buckled_head", "n_plastic", "max_strain",
+           "perforation", "deck_mu_max", "deck_mu_res", "pile_axial_max", "pile_m_res",
            "soil_yield", "wall_move", "bridge_rel", "apron_step", "allow_surcharge", "allow_berthing", "allow_tractive", "status", "reasons",
            "allow_surcharge_by", "allow_berthing_by", "allow_tractive_by", "refine_reason", "seconds", "det"]
 DISTS = ("lognormal", "normal", "uniform", "choice")
@@ -275,12 +277,14 @@ def _pier(data, segment, model):
     return _PIERS[key]
 
 
-def _summary(r, sid, tier, params, seconds):
-    """FlowResult → 結果の表の 1行"""
+def _summary(pier, r, sid, tier, params, seconds):
+    """FlowResult → 結果の表の 1行。本震時の記録（ガイドライン 表 D-5）: 上部工の梁の M/Mu（履歴中の最大・残留、
+    梁の主筋の断面欠損を考慮）、杭の軸力 / 設計支持力の最大、杭のヒンジの残留モーメント / My の最大"""
     c = r.case
     head, head_r = r.max_rotation("杭頭"), r.max_rotation("杭頭", residual=True)
     ing, ing_r = r.max_rotation("地中部"), r.max_rotation("地中部", residual=True)
     dm = r.damage()
+    secs = deck_sections(pier, read_deterioration(params, [pier.gy[j][0] for j in pier.pile_rows])["rebar_loss"])
     surf = params.get("surface")
     sc = params.get("scour")
     return {
@@ -298,9 +302,12 @@ def _summary(r, sid, tier, params, seconds):
         "deck_rot": r.deck["rot_residual"], "head_rot_max": head[0], "head_rot_res": head_r[0],
         "inground_rot_max": ing[0], "inground_rot_res": ing_r[0], "n_yield": len(r.yielded),
         "n_buckled": sum(x["level"] == "局部座屈" for x in dm) if dm else None,
+        "n_buckled_head": sum(x["level"] == "局部座屈" and x["kind"] == "杭頭" for x in dm) if dm else None,
         "n_plastic": sum(x["level"] == "塑性化" for x in dm) if dm else None,
         "max_strain": max((x["strain"] for x in dm), default=None) if dm else None,
         "perforation": any("開孔" in w for w in r.warnings),
+        "deck_mu_max": r.deck_ratio(pier, secs)[0], "deck_mu_res": r.deck_ratio(pier, secs, residual=True)[0],
+        "pile_axial_max": r.pile_axial_ratio(pier)[0], "pile_m_res": r.residual_moment_ratio()[0],
         "soil_yield": sum(s.yielded for s in r.soil.values()), "refine_reason": "",
         "seconds": round(seconds, 2),
         "det": json.dumps(params["_det"], ensure_ascii=False) if params.get("_det") else None,
@@ -351,7 +358,7 @@ def run_one(data, sid, params, tier, segments):
     """1シナリオの計算と結果の行（usability があれば許容荷重と判定を含む）"""
     t0 = time.time()
     pier, r = analyze(data, sid, params, tier, segments)
-    row = _summary(r, sid, tier, params, time.time() - t0)
+    row = _summary(pier, r, sid, tier, params, time.time() - t0)
     if pier.usability:                                   # 許容荷重と判定（U5）、土留部と渡版（D3）
         row.update(usability_eval(pier, r, params))
         row["status"], reasons = judge(row, usability_opts(pier, params))
