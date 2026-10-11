@@ -23,8 +23,9 @@ import yaml
 from . import pier_chain, svg
 from .chain_draw import code_str, full_svg
 from .port_cards import CARD_CSS, STATUS_CLS
-from .port_usability import (LOAD_NAME, RETAIN_LIMITS, STATUS, final_rows, fit_fragility, judge, load_text, read_usability,
-                             required_values)
+from .port_usability import (LOAD_NAME, METHOD_SEP, RETAIN_LIMITS, STATUS, final_rows, fit_fragility, judge, judge_detail,
+                             load_text, read_usability, required_values)
+from .usability_report import criteria_html
 from .report import Raw, assemble_html, figure, table
 
 BLOCK_SCENARIO = {"chloride": "S1", "chloride_top": "S1", "pile": "S2", "scour": "S4"}
@@ -33,19 +34,23 @@ SC_NAME = {s[0]: s[1] for s in pier_chain.SCENARIOS}
 CATS = [("上部工の残留変位", "上部工の残留変位"), ("杭の残留の塑性回転角", "杭の回転角"), ("杭の局部座屈", "杭の局部座屈"),
         ("杭の塑性化", "杭の塑性化"), ("渡版の開き", "渡版の開き"), ("土留部が上部工", "土留部が寄る"),
         ("段差", "背後の段差"), ("上載荷重", "上載荷重の不足"), ("接岸力", "接岸力の不足"), ("牽引力", "牽引力の不足"),
-        ("上部工の梁が Mu", "本震時の上部工の Mu"), ("杭の軸力が設計支持力", "本震時の杭の軸力"), ("余震", "余震に対する余裕")]
+        ("上部工の梁が Mu", "上部工の梁の Mu"), ("杭の軸力が設計支持力", "杭の軸力"), ("余震", "余震に対する余裕"),
+        ("限界曲率の超過は未確認", "限界曲率が未確認"), ("土留部の残留水平変位", "土留部の変位")]
 DET_KEYS = [("rebar_loss_bottom", "梁の下端筋の断面欠損率", "{:.1%}"), ("corrosion_head", "杭頭側の腐食量 [mm]", "{:.2f}"),
             ("corrosion_sea", "海中部の腐食量 [mm]", "{:.2f}"), ("corrosion_soil", "地中部の腐食量 [mm]", "{:.2f}"),
             ("scour", "洗掘深さ（海側の列）[m]", "{:.2f}")]
 HEAD_BINS = (0, 4, 7, 10, 13, math.inf)
 MIN_WORSE = 10                    # 悪化した抽出がこれより少なければ劣化の量を比べない
 SURF_BINS = (0, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, math.inf)
+SHORT_ST = ("利用可", "注意事項あり", "利用不可")                 # 図の凡例（STATUS の順）
+LEGEND_ST = [(s, f"pt{k}") for k, s in enumerate(SHORT_ST)]
 EXTRA_CSS = """
 figure svg#chain{max-width:100%;height:auto;display:block}
 .bar0{fill:#1b7f3b}.bar1{fill:#e69f00}.bar2{fill:#c0392b}.barlbl{font-size:11px;fill:#fff;font-weight:700}
 .keyfig{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin:12px 0}
 .keyfig div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px}
 .keyfig b{display:block;font-size:22px}.keyfig span{color:var(--mute);font-size:12.5px}
+.pa0{fill:#1f4e79;fill-opacity:.8}.pa1{fill:#8e44ad;fill-opacity:.8}.pa2{fill:#d35400;fill-opacity:.85}
 details{margin:6px 0}summary{cursor:pointer;color:var(--acc)}
 """
 KNOWN = [
@@ -81,7 +86,8 @@ def _num(v):
 
 def load_study(root):
     """結果のフォルダを読む。戻り値: [case]（常時 → 地震後、名前の順）。case: dict(name, data, rows, eq, level, label,
-    scenarios, opts, ages, text)"""
+    scenarios, opts, ages, text)。判定（status・reasons・methods_ok）は入力の usability の設定で判定し直す
+    （判定の規則・閾値を変えたときに計算し直さずに報告書を作れる。解析の値・許容荷重は結果の行のまま）"""
     root = Path(root)
     cases = []
     for p in sorted((root / "inputs").glob("*.yaml")):
@@ -96,6 +102,7 @@ def load_study(root):
         det = sc.get("deterioration") or {}
         ids = sorted({BLOCK_SCENARIO[b] for b in det if b in BLOCK_SCENARIO})
         opts = read_usability(None, d["usability"])
+        rows = [{**r, **_judged(r, opts)} for r in rows]
         if eq:
             ids = sorted(set(ids) | {"S3"} | ({"S5"} if any(k in opts["limits"] for k in RETAIN_LIMITS) else set()))
         level = p.stem.split("_")[0] if eq else "常時"
@@ -107,10 +114,24 @@ def load_study(root):
     return cases
 
 
+def _judged(r, opts):
+    st, reasons, ok = judge_detail(r, opts)
+    return {"status": st, "reasons": " / ".join(reasons), "methods_ok": None if ok is None else METHOD_SEP.join(ok)}
+
+
 def probs(rows):
     n = len(rows)
     c = Counter(r["status"] for r in rows)
     return {s: (c[s] / n if n else math.nan, math.sqrt(c[s] / n * (1 - c[s] / n) / n) if n else math.nan) for s in STATUS}
+
+
+def reason_lines(r, level):
+    """判定 level を決めた理由の行。利用方法がなければ「level: …」の行、あれば「… で不可: …」の行
+    （注意事項ありでは「注意事項: …」も）"""
+    lines = [x for x in (r.get("reasons") or "").split(" / ") if x]
+    if any(x.startswith("使える利用方法:") for x in lines):
+        return [x for x in lines if "で不可:" in x or (level == STATUS[1] and x.startswith("注意事項:"))]
+    return [x for x in lines if x.startswith(level + ":")]
 
 
 def reason_counts(rows, level):
@@ -120,9 +141,8 @@ def reason_counts(rows, level):
         if r["status"] != level:
             continue
         hit = set()
-        for x in (r.get("reasons") or "").split(" / "):
-            if x.startswith(level + ":"):
-                hit |= {name for key, name in CATS if key in x}
+        for x in reason_lines(r, level):
+            hit |= {name for key, name in CATS if key in x}
         k.update(hit)
     return k
 
@@ -181,7 +201,7 @@ def stack_chart(items, width=720):
     W = width - ml - mr
     h = mt + len(items) * (bh + gap) + 24
     body = []
-    for k, s in enumerate(STATUS):
+    for k, s in enumerate(SHORT_ST):
         x = ml + k * 130
         body.append(f'<rect class="bar{k}" x="{x}" y="4" width="14" height="10"/>')
         body.append(svg.text((x + 20, 13), s, "axlbl", anchor="start"))
@@ -213,7 +233,9 @@ def _cover(study, ctx):
     return (f'<section class="cover"><h1>{escape(study.title)}</h1>'
             '<p class="mute">変状連鎖図（港湾空港技術研究所資料 No.1328 に基づく）の重点シナリオ S1〜S5 に確率分布を与え、'
             'rcframe の事象追跡型の増分解析で、劣化した直杭式横桟橋の常時と地震後の利用可否を求めた。'
-            '分布・判定基準・必要な荷重は仮の値で、数値は仮定に対する目安である。単位: m, mm, kN, 年</p>'
+            + ('判定は港湾施設の利用可否判断に係るガイドライン 第2版（令和8年5月）の表 D-5 に合わせ、利用方法ごとに行った。'
+               if any(_methods(c) for c in ctx["cases"]) else "")
+            + '分布・判定基準・必要な荷重は仮の値で、数値は仮定に対する目安である。単位: m, mm, kN, 年</p>'
             f"<dl>{dl}</dl></section>")
 
 
@@ -230,6 +252,12 @@ def _key_numbers(ctx):
         p0, p1 = probs(at(c["rows"], c["ages"][0])), probs(at(c["rows"], c["ages"][-1]))
         out.append((f"{p0[STATUS[2]][0]:.1%} → {p1[STATUS[2]][0]:.1%}",
                     f"{c['level']} 地震後の利用不可（{c['ages'][0]:g} 年 → {c['ages'][-1]:g} 年）"))
+        ms = _methods(c)
+        if ms:
+            m3 = list(ms)[-1]
+            g0, g1 = at(c["rows"], c["ages"][0]), at(c["rows"], c["ages"][-1])
+            out.append((f"{sum(_usable(r, m3) for r in g0) / len(g0):.0%} → {sum(_usable(r, m3) for r in g1) / len(g1):.0%}",
+                        f"{c['level']} 地震後に {m3}（フェーズ {ms[m3]['phase']}）が使える割合"))
     return out
 
 
@@ -409,8 +437,16 @@ def sec_method(study, ctx):
            "流動層の低減）と土留部の比を同時に抽出し、年数の間で共通にした（同じ地震で劣化の有無を比べられる）。</p>",
            "<p>解析は rcframe の事象追跡型の荷重増分解析（地盤ばねモデル、杭の塑性ヒンジ、除荷）。1段目は粗い分割と cos 式の"
            "ヒンジ、2段目はファイバーの M–φ（εcu 式B）のヒンジ。常時は全てを 2段目で計算し、地震後は杭が降伏したか残留変位が "
-           "0.05 m 以上のものを 2段目で計算した（1段目の残留変位 0.5 m 以上は利用不可に決まるので除く）。</p>",
+           "0.05 m 以上のものを 2段目で計算した"
+           + ("（1段目の残留変位 0.5 m 以上は利用不可に決まるので除く）。</p>" if any(
+               (e["data"]["scenarios"].get("refine") or {}).get("skip_above") for e in ctx["eq"]) else "。</p>"),
            "<h3>判定基準と必要な荷重</h3>"]
+    if any(_methods(cc) for cc in ctx["cases"]):
+        for cc in (ctx["eq"][:1] or ctx["normal"][:1]):
+            out.append(criteria_html(cc["opts"]))
+        out.append('<p class="note">常時のケースは地震がないので、本震時・余震・土留部の条件はなく、利用方法ごとの利用時の荷重だけで'
+                   "判定する。数値は仮の値（想定船舶の牽引力・接岸力、余震の震度、土留部・渡版・段差の閾値）。</p>")
+        return "".join(out)
     trs = []
     for cc in (ctx["normal"][:1] + ctx["eq"][:1]):
         lim = cc["opts"]["limits"]
@@ -467,14 +503,14 @@ def sec_normal(study, ctx):
            for r in g if _num(r.get("corrosion_head")) and _num(r.get("allow_berthing"))]
     if pts:
         out.append(figure(Raw(svg.scatter_chart(pts, "杭頭側の腐食量 [mm]", "許容接岸力 [kN]",
-                                                [(s, f"pt{k}") for k, s in enumerate(STATUS)], yfmt="{:,.0f}")),
+                                                LEGEND_ST, yfmt="{:,.0f}")),
                           f"{full['label']} {a:g} 年: 杭頭側の腐食量と許容接岸力（色は判定）"))
     pts = [(r["rebar_loss_bottom"] * 100, r["allow_surcharge"], f"pt{STATUS.index(r['status'])}",
             f"{r['status']}: 欠損率 {r['rebar_loss_bottom']:.1%}、許容上載荷重 {r['allow_surcharge']:.0f}")
            for r in g if _num(r.get("rebar_loss_bottom")) and _num(r.get("allow_surcharge"))]
     if pts:
         out.append(figure(Raw(svg.scatter_chart(pts, "梁の下端筋の断面欠損率 [%]", "許容上載荷重 [kN/m²]",
-                                                [(s, f"pt{k}") for k, s in enumerate(STATUS)])),
+                                                LEGEND_ST)),
                           f"{full['label']} {a:g} 年: 下端筋の断面欠損率と許容上載荷重（色は判定）"))
     return "".join(out)
 
@@ -570,7 +606,7 @@ def sec_eq(study, ctx):
     if pts:
         out.append(f"<h3>杭頭の腐食と局部座屈（{escape(c['level'])}、{a:g} 年）</h3>")
         out.append(figure(Raw(svg.scatter_chart(pts, "杭頭側の腐食量 [mm]", "陸側の列の海底面の地盤変位 [m]",
-                                                [(s, f"pt{k}") for k, s in enumerate(STATUS)], yfmt="{:.2f}")),
+                                                LEGEND_ST, yfmt="{:.2f}")),
                           f"{c['level']} 地震後 {a:g} 年: 杭頭側の腐食量と地盤変位（色は判定）"))
         b = _bins(g, "corrosion_head", HEAD_BINS, lambda r: bool(r.get("n_buckled")))
         bu = _bins(g, "corrosion_head", HEAD_BINS, lambda r: r["status"] == STATUS[2])
@@ -603,11 +639,11 @@ def sec_discussion(study, ctx):
         g0 = at(c["rows"], c["ages"][0])
         v0 = [r["allow_surcharge"] for r in g0 if _num(r.get("allow_surcharge"))]
         gov = Counter(r.get("allow_surcharge_by", "").split("（")[0] for r in g).most_common(1)[0]
-        p = probs(g)
+        req_q = required_values(c["opts"])["surcharge"]                 # 利用方法があれば最も大きい値
         out.append(f"<h3>{escape(nm['S1'])}</h3><p>常時の許容上載荷重の中央値は {c['ages'][0]:g} 年 {np.median(v0):.0f}、"
                    f"{a:g} 年 {np.median(v):.0f} kN/m²（5% 値 {quant(v, 0.05):.0f}）で、{gov[1]}/{len(g)} 件で{escape(gov[0])}"
-                   f"が限界になる。必要な値 {c['opts']['required']['surcharge']:g} kN/m² を下回るのは {a:g} 年で "
-                   f"{_pct(p[STATUS[1]][0] + p[STATUS[2]][0])}。下端筋の欠損は梁の Mu だけに効くため、地震後の判定への影響は小さい"
+                   f"が限界になる。必要な値 {req_q:g} kN/m² を下回るのは {a:g} 年で "
+                   f"{_pct(float(np.mean([x < req_q for x in v])))}。下端筋の欠損は梁の Mu だけに効くため、地震後の判定への影響は小さい"
                    "（6 章の悪化した抽出とそれ以外で欠損率の差は小さい）。予防保全では、腐食が外観に現れる前の塩化物イオン量・"
                    "かぶり（点検 (8) の詳細調査）で腐食の開始時期を絞ることが効く。</p>")
     # S2
@@ -693,14 +729,33 @@ def sec_discussion(study, ctx):
     return "".join(out)
 
 
+def _known(ctx):
+    """留意事項（ケースの設定に合わせる）"""
+    guide = any(_methods(c) for c in ctx["cases"])
+    skip = any((e["data"]["scenarios"].get("refine") or {}).get("skip_above") for e in ctx["eq"])
+    out = []
+    for x in KNOWN:
+        if x.startswith("地震後は、1段目の残留変位が skip_above") and not skip:
+            continue
+        if x.startswith("判定基準・必要な荷重は仮の値") and guide:
+            x = ("判定はガイドライン第2版の表 D-5 に合わせたが、利用方法の荷重（想定船舶の牽引力・接岸力）、余震の震度（L1 相当）、"
+                 "土留部の残留水平変位・渡版の開き・段差の閾値は仮の値")
+        out.append(x)
+    if guide:
+        out += ["余震は本震後の状態に慣性力 kh·W を静的に漸増させた（余震による地盤変位の増加・液状化なし）。梁の限界は Mu"
+                "（材料係数 1.0）で、ガイドラインの設計断面耐力とは係数が異なる",
+                "杭の支持力は設計支持力の入力があるときだけ確かめる（この計算例は入力なし）。フェーズ 1 の特性値は設計値で代える"]
+    return out
+
+
 def sec_notes(study, ctx):
-    return ("<h3>仮定と簡略化</h3><ul class='list'>" + "".join(f"<li>{escape(x)}</li>" for x in KNOWN) + "</ul>"
+    return ("<h3>仮定と簡略化</h3><ul class='list'>" + "".join(f"<li>{escape(x)}</li>" for x in _known(ctx)) + "</ul>"
             + "<h3>結果を確かにするために必要なデータ</h3>"
             + table(["データ（点検診断の項目）", "用途"], NEEDS))
 
 
 def sec_appendix(study, ctx):
-    out = ["<h3>再現の方法</h3><pre class='src'>python examples/kawasaki_deterioration.py -j 6        # 計算（再開できる）\n"
+    out = [f"<h3>再現の方法</h3><pre class='src'>python examples/{escape(ctx['root'].name)}.py -j 6        # 計算（再開できる）\n"
            f"python -m rcframe.deterioration_report {escape(str(ctx['root'].as_posix()))} -o 報告書.html</pre>",
            "<h3>照合（テスト）</h3>",
            table(["項目", "照合した理論値・手計算", "テスト"], [
@@ -709,10 +764,300 @@ def sec_appendix(study, ctx):
                ["劣化のモデル（D2）", "erfc(1) で t_i = x²/(4D)、t_i で濃度 = Clim、欠損率・腐食量の手計算、抽出の統計量",
                 "tests/test_deterioration_model.py"],
                ["土留部と渡版（D3）", "判定の境界、移動・開き・段差の手計算", "tests/test_retaining.py"],
-               ["報告書（D5）", "表の確率 = 結果の行の集計、外部参照なし", "tests/test_deterioration_report.py"]])]
+               ["報告書（D5）", "表の確率 = 結果の行の集計、外部参照なし", "tests/test_deterioration_report.py"],
+               ["本震時の記録（G1）", "梁の M/Mu = section_forces_at の最大、長期の軸力 = 線形解析", "tests/test_main_shock.py"],
+               ["余震（G2）", "弾性範囲の許容震度 = 両向きの線形解析の重ね合わせ", "tests/test_aftershock.py"],
+               ["利用方法ごとの判定（G3）", "表 D-5 の項目ごとの不可の範囲、注意事項、荷重", "tests/test_methods.py"]])]
     for c in ctx["cases"]:
         out.append(f"<details><summary>入力 {escape(c['name'])}.yaml（{escape(c['label'])}）</summary>"
                    f"<pre class='src'>{escape(c['text'])}</pre></details>")
+    return "".join(out)
+
+
+# ================================================================ ガイドライン（G4）
+D5_ROWS = [
+    ["杭の損傷", "フェーズ 1: 限界曲率以下（局部座屈 = θu に達したヒンジがない）／フェーズ 2・3: 降伏以下（降伏したヒンジがない）",
+     "降伏以下: 本震後に kh·W を両向きに漸増し、杭の塑性回転が増える震度 ≧ 想定の余震の震度", "降伏以下: 許容荷重 ≧ 利用方法の荷重"],
+    ["杭の支持力", "杭の軸力 / 設計支持力 < 1（入力があるとき）", "同（余震の漸増の限界）", "同（許容荷重の限界）"],
+    ["上部工の断面破壊", "本震の履歴中の梁の M/Mu < 1", "梁の M ≦ Mu（余震の漸増の限界）", "梁の M ≦ Mu（許容荷重の限界）"],
+    ["土留部の変状", "土留部の残留水平変位（比 × 陸側の地盤変位）≦ 閾値（フェーズ 2・3 / 全て）", "-", "-"],
+]
+
+
+def _methods(c):
+    return c["opts"].get("methods") or {}
+
+
+def _usable(r, m):
+    return m in (r.get("methods_ok") or "").split(METHOD_SEP)
+
+
+def _res(r):
+    return abs(r["deck_residual"])
+
+
+def _pse(k, n):
+    p = k / n if n else math.nan
+    return f"{p:.1%}±{math.sqrt(p * (1 - p) / n):.1%}" if n else "-"
+
+
+def _counts_text(cnt, top=5):
+    return "、".join(f"{k} {v}" for k, v in cnt.most_common(top)) or "-"
+
+
+def _phase_method(ms, phase):
+    """フェーズ phase の利用方法（なければ最初）の名前"""
+    return next((m for m, v in ms.items() if v["phase"] == phase), next(iter(ms)))
+
+
+def _head_allowed(opts):
+    """杭頭の限界曲率の超過を許す（フェーズ 1 は可）判定の設定"""
+    lim = {**opts["limits"], "pile_damage": {**opts["limits"]["pile_damage"], "杭頭の局部座屈": "limited"}}
+    return {**opts, "limits": lim}
+
+
+def sec_guideline(study, ctx):
+    cs = [c for c in ctx["cases"] if _methods(c)]
+    if not cs:
+        return None
+    ms = _methods(cs[0])
+    out = ["<p>港湾施設の利用可否判断に係るガイドライン 第2版（国土交通省港湾局、令和8年5月）の付録 D（表 D-5）に合わせ、"
+           "利用方法（利用フェーズ × 利用形態、表 D-1）ごとに、本震時・余震時・地震後の利用時の部材の条件で判定した。"
+           "区分は能登半島地震の際の公表と同じ「利用可／利用可（注意事項あり）／利用不可」で、利用可は全ての利用方法が使えて"
+           "注意事項（緊急復旧）がないもの、利用不可はどの利用方法も使えないもの。</p>",
+           "<h3>利用方法</h3>",
+           table(["利用方法", "フェーズ", "内容"] + [LOAD_NAME[k] for k in ("surcharge", "berthing", "tractive")],
+                 [[m, str(v["phase"]), v["label"] or "-"] + [load_text(k, v["loads"][k]) if k in v["loads"] else "-"
+                                                             for k in ("surcharge", "berthing", "tractive")]
+                  for m, v in ms.items()]),
+           "<h3>表 D-5 の条件と解析での扱い</h3>",
+           wrapt(table(["確認項目", "本震時", "余震時", "地震後の利用時"], D5_ROWS)),
+           '<p class="note">本震時の条件は地震の履歴の全体で満たす条件（静的な増分解析の載荷から除荷まで）。余震は '
+           + escape(", ".join(f"{c['level']} kh = {c['opts']['required']['aftershock']:g}" for c in cs
+                              if "aftershock" in c["opts"]["required"]) or "なし")
+           + "。施設の利用の観点（渡版の開き・背後の段差）は緊急復旧を前提とした注意事項とした。</p>"]
+    # 利用方法ごとの使える割合
+    trs = []
+    for c in cs:
+        for a in c["ages"]:
+            g = at(c["rows"], a)
+            p = probs(g)
+            trs.append([c["label"], f"{a:g}"] + [_pse(sum(_usable(r, m) for r in g), len(g)) for m in ms]
+                       + [f"{p[s][0]:.1%}" for s in STATUS])
+    out.append("<h3>利用方法ごとの使える割合</h3>")
+    out.append(wrapt(table(["ケース", "年数"] + [f"{m} が使える" for m in ms] + list(STATUS), trs,
+                           num=tuple(range(1, len(ms) + 5)))))
+    out.append('<p class="note">± は標準誤差。利用可 = 全ての利用方法が使えて注意事項がない割合。利用不可 = 想定した利用方法'
+               "（利用時の荷重・船舶）のどれも使えないこと。許容荷重が想定の値に満たなくても、より小さい船舶・載荷重なら使える場合が"
+               "ある（8 章の許容荷重の図を参照）。</p>")
+    for c in [c for c in cs if c["eq"]]:
+        series = [(m, [(a, sum(_usable(r, m) for r in at(c["rows"], a)) / len(at(c["rows"], a))) for a in c["ages"]],
+                   f"c{i % 3}") for i, m in enumerate(ms)]
+        same = len({tuple(_usable(r, m) for r in c["rows"]) for m in ms}) == 1
+        out.append(figure(Raw(svg.xy_chart(series, "供用年数 [年]", "使える割合", xfmt="{:g}", yfmt="{:.0%}")),
+                          f"{c['level']} 地震後: 利用方法ごとの使える割合と供用年数（同じ地震の抽出）"
+                          + ("。全ての抽出で利用方法の可否が同じなので線が重なる" if same else "")))
+        if same:
+            out.append(f'<p class="note">{escape(c["level"])}: 全ての抽出で、どの利用方法も同時に使える か 同時に使えない。'
+                       "利用方法を分ける条件（フェーズ 2・3 の本震時の降伏以下、上載荷重）だけで不可になる抽出は、"
+                       "全ての利用方法に効く条件（余震・限界曲率・上部工）でも不可になっている。</p>")
+    # 不可・注意事項の理由
+    trs = []
+    for c in cs:
+        for a in c["ages"]:
+            g = at(c["rows"], a)
+            trs.append([c["label"], f"{a:g}", _counts_text(reason_counts(g, STATUS[2])),
+                        _counts_text(reason_counts(g, STATUS[1]))])
+    out.append("<h3>判定を決めた条件</h3>")
+    out.append(wrapt(table(["ケース", "年数", "利用不可の理由（件数、重複あり）", "注意事項ありの理由（件数、重複あり）"], trs,
+                           num=(1,))))
+    # 本震時の上部工・杭頭・余震
+    trs = []
+    for c in [c for c in cs if c["eq"]]:
+        req = c["opts"]["required"].get("aftershock")
+        for a in c["ages"]:
+            g = at(c["rows"], a)
+            n = len(g)
+            af = [r["allow_aftershock"] for r in g if _num(r.get("allow_aftershock"))]
+            bk = [r for r in g if (r.get("n_buckled") or 0) > 0]
+            head = sum(r.get("n_buckled_head") == r["n_buckled"] for r in bk)
+            trs.append([c["label"], f"{a:g}", _pse(sum((r.get("deck_mu_max") or 0) >= 1 for r in g), n),
+                        _pse(len(bk), n), f"{head}/{len(bk)}",
+                        f"{np.median(af):.3f}（{quant(af, 0.1):.3f}）" if af else "-",
+                        _pse(sum(x < req for x in af), n) if af and req is not None else "-"])
+    if trs:
+        out.append("<h3>本震時の上部工・杭と余震</h3>")
+        out.append(wrapt(table(["ケース", "年数", "本震で梁が Mu", "局部座屈あり", "うち杭頭だけ",
+                                "余震の許容震度（10% 値）", "許容震度 < 想定"], trs, num=(1, 2, 3, 4, 5, 6))))
+        out.append('<p class="note">余震の許容震度は、杭の降伏・梁の Mu・杭の支持力に最初に達する震度（両向きの小さい方）。</p>')
+    # 杭頭の限界曲率の超過を許した場合（港空研資料 No.1429）
+    trs = []
+    for c in [c for c in cs if c["eq"]]:
+        o2 = _head_allowed(c["opts"])
+        m1 = _phase_method(_methods(c), 1)
+        for a in c["ages"]:
+            g = at(c["rows"], a)
+            j2 = [judge_detail(r, o2) for r in g]
+            n = len(g)
+            trs.append([c["label"], f"{a:g}", f"{probs(g)[STATUS[2]][0]:.1%}", f"{sum(j[0] == STATUS[2] for j in j2) / n:.1%}",
+                        f"{sum(_usable(r, m1) for r in g) / n:.1%}", f"{sum(m1 in j[2] for j in j2) / n:.1%}"])
+    expl = []
+    for c in [c for c in cs if c["eq"]]:
+        req = c["opts"]["required"].get("aftershock")
+        ho = [r for r in at(c["rows"], c["ages"][-1]) if (r.get("n_buckled") or 0) > 0 and r.get("n_buckled_head") == r["n_buckled"]]
+        if ho and req is not None:
+            k = sum(_num(r.get("allow_aftershock")) and r["allow_aftershock"] < req for r in ho)
+            expl.append(f"{c['level']} の {c['ages'][-1]:g} 年で杭頭だけが局部座屈した {len(ho)} 件のうち {k} 件は、"
+                        f"余震の許容震度が想定（kh = {req:g}）に満たない（局部座屈した杭頭は余震で塑性回転が増える）。")
+    if trs:
+        out.append("<h3>杭頭の限界曲率の超過を許した場合</h3>")
+        if expl:
+            out.append("<p>" + escape("".join(expl)) + "そのため、杭頭の超過を許しても余震の条件で不可になる。</p>")
+        out.append(wrapt(table(["ケース", "年数", "利用不可（既定）", "利用不可（杭頭を許す）", f"{m1} が使える（既定）",
+                                f"{m1} が使える（杭頭を許す）"], trs, num=(1, 2, 3, 4, 5))))
+        out.append('<p class="note">ガイドラインの表 D-5 の注は、鋼管杭の杭頭は一定程度まで限界曲率の超過を許容できる可能性がある'
+                   "（港湾空港技術研究所資料 No.1429）として、専門技術者への相談を求めている。ここでは杭頭だけの局部座屈をフェーズ 1 では"
+                   "可とした場合を、結果の行から判定し直した（腐食した杭頭の局部座屈後の耐力は確かめていない）。</p>")
+    return "".join(out)
+
+
+def _yield_disp(pier, corr):
+    """表 A-1 の簡易な目安: 杭を両端固定の梁とみなし、片側を変位させて降伏する水平変位 δy = My·L²/(6EI)。
+    L = 上部工の下面 − 仮想固定点（海底面 − 1/β）、My = fy·Z（外面の腐食 corr [mm] の後、軸力 0、残りの板厚は 1 mm 以上）、
+    EI は腐食前。戻り値: {杭の列: δy [m]}（列の中の最小）"""
+    out = {}
+    for (i, j), p in pier.piles.items():
+        sec, mat = pier.pile_sec[(i, j)]
+        Do, Di = sec.dims(corroded=False)
+        Dc = max(Do - 2 * corr, Di + 2.0)
+        Z = math.pi / 32 * (Dc ** 4 - Di ** 4) / Dc
+        EI = mat.E * math.pi / 64 * (Do ** 4 - Di ** 4)
+        L = pier.z_soffit - p["z_fix"]
+        name = pier.gy[j][0]
+        out[name] = min(out.get(name, math.inf), mat.fy * Z * L ** 2 / (6 * EI) / 1e3)
+    return out
+
+
+def sec_indicator(study, ctx):
+    cs = [c for c in ctx["eq"] if _methods(c)]
+    if not cs:
+        return None
+    out = ["<p>ガイドライン（3.5・3.6、付録 D.6）は、事前の数値解析で法線の残留水平変位と構造物の状態の関係を整理しておき、"
+           "発災後に計測した残留水平変位で利用可否を判断することを求めている（図 D-8・D-9）。ここでは抽出したシナリオの"
+           "上部工の残留水平変位（防災基準点からの相対変位に当たる）を指標として、その関係を年数ごとに示す。"
+           "ガイドラインの横軸は地震動の大きさ（速度 PSI 値など）だが、ここでは陸側の列の海底面の地盤変位で代える。</p>"]
+    for c in cs:
+        ms = _methods(c)
+        ages = c["ages"]
+        out.append(f"<h3>{escape(c['level'])} 地震後: 地震の大きさと残留水平変位（図 D-8 に当たる）</h3>")
+        for a in (ages[0], ages[-1]):
+            pts = [(float(r["surface"]), _res(r), f"pt{STATUS.index(r['status'])}",
+                    f"{r['status']}: 地盤変位 {float(r['surface']):.3f} m、残留 {_res(r):.3f} m、使える {r.get('methods_ok') or 'なし'}")
+                   for r in at(c["rows"], a) if _num(r.get("surface"))]
+            out.append(figure(Raw(svg.scatter_chart(pts, "陸側の列の海底面の地盤変位 [m]", "上部工の残留水平変位 [m]",
+                                                    LEGEND_ST, xfmt="{:.2f}",
+                                                    yfmt="{:.2f}")),
+                              f"{c['level']} 地震後 {a:g} 年: 地盤変位と上部工の残留水平変位（色は判定）"))
+        out.append(f"<h3>{escape(c['level'])} 地震後: 残留水平変位と許容荷重（図 D-9 に当たる）</h3>")
+        req = c["opts"]["required"].get("aftershock")
+        tv = sorted({v["loads"]["tractive"] for v in ms.values() if "tractive" in v["loads"]})
+        bv = sorted({v["loads"]["berthing"] for v in ms.values() if "berthing" in v["loads"]})
+        for key, name, marks, fmt in (("allow_tractive", "許容牽引力 [kN]", [(v, f"利用方法の牽引力 {v:g} kN") for v in tv], "{:,.0f}"),
+                                      ("allow_berthing", "許容接岸力 [kN]", [(v, f"利用方法の接岸力 {v:g} kN") for v in bv], "{:,.0f}"),
+                                      ("allow_aftershock", "余震の許容震度 kh", [(req, f"想定の余震 kh = {req:g}")] if req else [],
+                                       "{:.2f}")):
+            top = 3 * max([m_[0] for m_ in marks] + [1e-9])
+            pts = [(_res(r), min(r[key], top), f"pa{i % 3}", f"{a:g} 年: 残留 {_res(r):.3f} m、{name} {r[key]:.3g}")
+                   for i, a in enumerate(ages) for r in at(c["rows"], a) if _num(r.get(key))]
+            if pts:
+                out.append(figure(Raw(svg.scatter_chart(pts, "上部工の残留水平変位 [m]", name,
+                                                        [(f"{a:g} 年", f"pa{i % 3}") for i, a in enumerate(ages)],
+                                                        xfmt="{:.2f}", yfmt=fmt, hmarks=marks)),
+                                  f"{c['level']} 地震後: 残留水平変位と{name.split(' [')[0]}（色は供用年数、利用方法の値の 3 倍で頭打ち）"))
+        # 閾値 A
+        a0 = ages[0]
+        trs = []
+        for m in ms:
+            row = [m]
+            A = {}
+            for a in ages:
+                bad = [_res(r) for r in at(c["rows"], a) if not _usable(r, m)]
+                A[a] = min(bad) if bad else None
+                row.append("-" if not bad else f"{min(bad):.3f}（{len(bad)} 件）")
+            for a in ages[1:]:
+                if A[a0] is None:
+                    row.append("-")
+                    continue
+                g = [r for r in at(c["rows"], a) if _res(r) < A[a0]]
+                k = sum(not _usable(r, m) for r in g)
+                row.append(f"{k}/{len(g)}（{k / len(g):.1%}）" if g else "-")
+            trs.append(row)
+        out.append(f"<h3>{escape(c['level'])} 地震後: 残留水平変位の閾値</h3>")
+        out.append(wrapt(table(["利用方法"] + [f"{a:g} 年の A [m]（件数）" for a in ages]
+                               + [f"{a:g} 年に {a0:g} 年の A で見逃す" for a in ages[1:]], trs)))
+        out.append(f'<p class="note">閾値 A = その利用方法が使えない抽出の残留水平変位の最小値（A 未満の抽出は全て使える。'
+                   f"ガイドラインの図 D-8 の A に当たる）。{a0:g} 年（劣化なし）の解析で決めた A を劣化した年数に使うと、"
+                   "右の列の割合で使えない施設を使えると判断することになる。</p>")
+        m_last = list(ms)[-1]
+        A0 = min((_res(r) for r in at(c["rows"], a0) if not _usable(r, m_last)), default=None)
+        if A0 is not None:
+            trs = []
+            for a in ages[1:]:
+                miss = [r for r in at(c["rows"], a) if _res(r) < A0 and not _usable(r, m_last)]
+                cnt = Counter()
+                for r in miss:
+                    cnt.update({n for x in reason_lines(r, r["status"]) for key, n in CATS if key in x})
+                trs.append([f"{a:g}", str(len(miss)), _counts_text(cnt, 6)])
+            out.append(table(["年数", f"{a0:g} 年の A（{m_last}、{A0:.3f} m）未満で使えない抽出", "理由（件数、重複あり）"], trs,
+                             num=(1,)))
+        # フラジリティ（横軸 = 残留水平変位）
+        m1 = _phase_method(ms, 1)
+        trs = []
+        for a in ages:
+            g = [r for r in at(c["rows"], a) if _res(r) > 0]
+            x = [_res(r) for r in g]
+            fmt_ = lambda f: "推定できない" if f is None or f[1] < 0.02 or f[1] > 5 else f"θ = {f[0]:.3f} m、β = {f[1]:.2f}"
+            trs.append([f"{a:g}", fmt_(safe_fit(x, [r["status"] != STATUS[0] for r in g])),
+                        fmt_(safe_fit(x, [not _usable(r, m1) for r in g]))])
+        out.append(f"<details><summary>{escape(c['level'])}: 残留水平変位に対するフラジリティ曲線 P = Φ(ln(x/θ)/β)</summary>"
+                   + table(["年数", "利用可でない（いずれかの利用方法が使えない）", f"{m1} が使えない"], trs)
+                   + '<p class="note">横軸を現地で測れる残留水平変位にした（6 章の地盤変位は現地で測れない）。</p></details>')
+    out.append(_simple_criterion(cs[0]))
+    return "".join(out)
+
+
+def _simple_criterion(c):
+    """表 A-1 の簡易な目安 δy と、解析による判定の比較（最初の地震後のケース）"""
+    from .pier import Pier
+    d = {k: v for k, v in c["data"].items() if k != "scenarios"}
+    pier = Pier(d)
+    ms = _methods(c)
+    m2 = _phase_method(ms, 2)
+    trs, cmp = [], []
+    for a in c["ages"]:
+        g = at(c["rows"], a)
+        ch = [r["corrosion_head"] for r in g if _num(r.get("corrosion_head"))]
+        corr = float(np.median(ch)) if ch else 0.0
+        dy = _yield_disp(pier, corr)
+        trs.append([f"{a:g}", f"{corr:.1f}"] + [f"{v:.3f}" for v in dy.values()])
+        lim = min(dy.values())
+        below = [r for r in g if _res(r) <= lim]
+        above = [r for r in g if _res(r) > lim]
+        miss = sum(not _usable(r, m2) for r in below)
+        safe = sum(_usable(r, m2) for r in above)
+        cmp.append([f"{a:g}", f"{lim:.3f}", f"{miss}/{len(below)}" + (f"（{miss / len(below):.1%}）" if below else ""),
+                    f"{safe}/{len(above)}" + (f"（{safe / len(above):.1%}）" if above else "")])
+    out = [f"<h3>表 A-1 の簡易な目安との比較（{escape(c['level'])} 地震後）</h3>",
+           "<p>ガイドラインの表 A-1（利用フェーズ 2・利用形態 A の例）は、事前の数値解析がない場合の桟橋の残留水平変位の目安を、"
+           "杭を両端固定（仮想固定点・上部工）の梁とみなし片側を変位させて降伏する水平変位 δy = My·L²/(6EI) としている。"
+           "列ごとの δy（杭頭側の腐食量はその年数の中央値）と、δy（最小の列）で判断した場合と解析による判定"
+           f"（利用方法 {escape(m2)}）の食い違いを示す。</p>",
+           table(["年数", "杭頭側の腐食量の中央値 [mm]"] + [f"δy 列 {k} [m]" for k in _yield_disp(pier, 0.0)], trs,
+                 num=tuple(range(1, 2 + len(pier.pile_rows)))),
+           table(["年数", "目安 δy [m]", f"δy 以下なのに {m2} が使えない", f"δy を超えるが {m2} が使える"], cmp, num=(1,)),
+           '<p class="note">My は軸力 0・腐食後の外径の断面、EI は腐食前、L = 上部工の下面 − 仮想固定点（海底面 − 1/β）。'
+           "目安は地盤ごと上部工が動く側方流動の変位も杭の変形とみなすので安全側に外れ、腐食による局部座屈の早まり"
+           "（径厚比の増加）は表せない。</p>"]
     return "".join(out)
 
 
@@ -723,6 +1068,8 @@ SECTIONS = (
     ("sec-method", "解析と判定の方法", sec_method),
     ("sec-normal", "常時の結果", sec_normal),
     ("sec-eq", "地震後の結果", sec_eq),
+    ("sec-guideline", "ガイドラインによる判定", sec_guideline),
+    ("sec-indicator", "残留水平変位による判断基準", sec_indicator),
     ("sec-discussion", "シナリオごとの考察", sec_discussion),
     ("sec-notes", "留意事項", sec_notes),
     ("sec-appendix", "付録", sec_appendix),
@@ -733,7 +1080,9 @@ def build_deterioration_report(root, title=None):
     """報告書の HTML（文字列）"""
     ctx = _compute(root)
     name = ctx["cases"][0]["data"].get("name", "").split("（")[0]
-    study = SimpleNamespace(name=name, report={}, title=title or f"変状連鎖の重点シナリオの確率評価 {name}")
+    guide = any(_methods(c) for c in ctx["cases"])
+    study = SimpleNamespace(name=name, report={}, title=title or (f"変状連鎖の重点シナリオと利用可否判断（ガイドライン第2版）{name}"
+                                                                  if guide else f"変状連鎖の重点シナリオの確率評価 {name}"))
     return assemble_html(study, SECTIONS, ctx, _cover(study, ctx), extra_css=CARD_CSS + EXTRA_CSS, title=study.title)
 
 

@@ -15,7 +15,7 @@ METHODS = {"1-A": {"phase": 1, "label": "必要最小限の輸送", "surcharge":
            "3-C": {"phase": 3, "label": "日常の利用", "surcharge": 20, "berthing": 500, "tractive": 350}}
 LIMITS = {"wall_move": {"limited": 0.3, "unusable": 0.5}, "apron_step": {"limited": 0.10},
           "bridge_opening": {"limited": 0.2}}
-GOOD = {"deck_residual": 0.05, "n_yield": 0, "n_plastic": 0, "n_buckled": 0, "n_buckled_head": 0, "deck_mu_max": 0.5,
+GOOD = {"kh": 0.1, "surface": 0.2, "deck_residual": 0.05, "n_yield": 0, "n_plastic": 0, "n_buckled": 0, "n_buckled_head": 0, "deck_mu_max": 0.5,
         "allow_surcharge": 50.0, "allow_berthing": 1000.0, "allow_tractive": 800.0, "allow_aftershock": 0.3,
         "wall_move": 0.1, "bridge_rel": -0.05, "apron_step": 0.02}
 
@@ -127,3 +127,11 @@ def test_batch_with_methods(tmp_path):
         assert r["reasons"].startswith("使える利用方法: ") and r["allow_aftershock"] is not None
     with open(tmp_path / "r.csv", encoding="utf-8-sig") as f:
         assert "methods_ok" in next(csv.reader(f))
+
+
+def test_wording_without_quake():
+    """地震のない行（常時の劣化だけ）では「長期荷重で」。地盤変位は列ごとの JSON でもよい"""
+    from rcframe.port_usability import has_quake
+    assert has_quake({"kh": 0.0, "surface": '{"L": 0.0, "S": 0.1}'}) and not has_quake({"kh": 0.0, "surface": 0.0})
+    st, why, ok = judge_detail({**GOOD, "kh": 0.0, "surface": 0.0, "deck_mu_max": 1.1}, _opts())
+    assert "全ての利用方法で不可: 長期荷重で上部工の梁が Mu に達した（M/Mu = 1.10）" in why

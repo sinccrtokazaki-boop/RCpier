@@ -125,8 +125,12 @@ def test_allowable_restores_state():
     u0 = fr.inc.u.copy()
     cases = set(p.model.member_loads) | set(p.model.nodal_loads)
     k0 = {n: k.copy() for n, k in p.model.node_springs.items()}
+    hist = {k: len(getattr(fr.inc.res, k)) for k in ("steps", "states", "hinge_theta", "events")}
+    last = fr.inc.res.states[max(fr.inc.res.states)][1]
     allowable_loads(p, fr, p.usability)
     np.testing.assert_array_equal(fr.inc.u, u0)
+    assert {k: len(getattr(fr.inc.res, k)) for k in hist} == hist                 # 本震の履歴も元のまま
+    assert fr.inc.res.states[max(fr.inc.res.states)][1] is last
     assert set(p.model.member_loads) | set(p.model.nodal_loads) == cases
     for n, k in p.model.node_springs.items():
         np.testing.assert_array_equal(k, k0[n])

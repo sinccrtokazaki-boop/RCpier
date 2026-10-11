@@ -33,6 +33,7 @@
 
 判定基準・必要な荷重は入力（ガイドライン・利用計画で定めること）。単位: YAML は m・rad・kN/m²・kN
 """
+import json
 import math
 from dataclasses import dataclass, field
 
@@ -293,10 +294,20 @@ def _limit_run(inc, pier, case, lam_max, base, opts, secs, piles, labels):
     return None
 
 
+HISTORY = ("steps", "events", "states", "hinge_theta", "hinge_M", "unconverged", "warnings")   # PushoverResult の履歴
+
+
 def allowable_loads(pier, fr, opts):
-    """被災状態（FlowResult fr の最終状態）からの許容荷重 {種類: Allowable}。fr の状態は元に戻す"""
+    """被災状態（FlowResult fr の最終状態）からの許容荷重 {種類: Allowable}。fr の状態は元に戻す。
+    算定の間は本震の履歴（HISTORY、最後のステップの状態だけ残す）を外す: 状態の複製（snapshot・restore）の
+    deepcopy が履歴の長さに比例して重くなるため。算定は新しいステップしか見ないので結果は同じ"""
     m, inc = pier.model, fr.inc
     saved = {nid: k.copy() for nid, k in m.node_springs.items()}
+    hist = {k: getattr(inc.res, k) for k in HISTORY}
+    last = inc.step
+    for k in HISTORY:
+        v = hist[k]
+        setattr(inc.res, k, {last: v[last]} if isinstance(v, dict) and last in v else type(v)())
     snap0 = inc.snapshot()
     cases = {}
     out = {}
@@ -337,10 +348,25 @@ def allowable_loads(pier, fr, opts):
                     m.member_loads.pop(case, None)
                     m.nodal_loads.pop(case, None)
         inc.restore(snap0)
+        for k, v in hist.items():                         # 本震の履歴を戻す
+            setattr(inc.res, k, v)
     return out
 
 
 # ============================================================ 判定
+def has_quake(row):
+    """地震（慣性力・地盤変位）のあるシナリオの行か（ないシナリオは常時の劣化だけ）"""
+    if row.get("kh"):
+        return True
+    s = row.get("surface")
+    if isinstance(s, str):
+        try:
+            return any(float(v) != 0 for v in json.loads(s).values())
+        except (ValueError, AttributeError):
+            return True
+    return bool(s)
+
+
 def _checks(row, opts):
     """荷重の不足以外の判定の項目 [(段階 0/1/2, 理由, 種類)]（段階は limits の ok / limited / unusable）。
     種類: "struct"（構造の安定の観点）または ("use", 緊急復旧の内容)（施設の利用の観点: 渡版・土留部の背後の段差）"""
@@ -375,10 +401,11 @@ def _checks(row, opts):
     n_pl = row.get("n_plastic") if row.get("n_plastic") is not None else row.get("n_yield", 0)
     if n_pl:
         add(code[pd["塑性化"]], f"杭の塑性化 {n_pl} 箇所")
+    when = "本震時に" if has_quake(row) else "長期荷重で"
     if (row.get("deck_mu_max") or 0) >= 1 and "deck_mu" in lim:
-        add(code[lim["deck_mu"]], f"本震時に上部工の梁が Mu に達した（M/Mu = {row['deck_mu_max']:.2f}）")
+        add(code[lim["deck_mu"]], f"{when}上部工の梁が Mu に達した（M/Mu = {row['deck_mu_max']:.2f}）")
     if (row.get("pile_axial_max") or 0) >= 1 and "pile_axial" in lim:
-        add(code[lim["pile_axial"]], f"本震時に杭の軸力が設計支持力に達した（N/Rd = {row['pile_axial_max']:.2f}）")
+        add(code[lim["pile_axial"]], f"{when}杭の軸力が設計支持力に達した（N/Rd = {row['pile_axial_max']:.2f}）")
     if row.get("wall_move") is not None and "wall_move" in lim:
         by_length("wall_move", row["wall_move"], f"土留部の残留水平変位 {row['wall_move']:.3f} m")
     rel = row.get("bridge_rel")

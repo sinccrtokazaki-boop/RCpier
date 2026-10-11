@@ -279,9 +279,11 @@ def sec_scenarios(pier, ctx):
 
 
 def sec_criteria(pier, ctx):
-    opts = pier.usability
-    if not opts:
-        return None
+    return criteria_html(pier.usability) if pier.usability else None
+
+
+def criteria_html(opts):
+    """判定基準・利用方法・許容荷重の限界の表（HTML）"""
     lim = opts["limits"]
     rows = []
     if "residual_displacement" in lim:

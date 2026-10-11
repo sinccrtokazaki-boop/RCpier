@@ -1,0 +1,324 @@
+# examples/kawasaki_guideline.py が作った入力（直接編集しない）
+type: pier
+name: 川崎港東扇島 −12m 岸壁 桟橋部（劣化と地震 L2_all、ガイドライン第2版の判定）
+report:
+  title: 川崎港 東扇島埠頭 −12m 岸壁 桟橋部 利用可否シナリオ検討
+  notes: 寸法は図面集から読み取り。地盤定数（N 値から換算）・材料・荷重・判定基準は仮定
+materials:
+  C24:
+    fck: 24
+  STK50:
+    steel: true
+    fy: 315
+sections:
+  GY:
+    b: 1000
+    D: 1500
+    material: C24
+    cover: 100
+    rebar:
+      main: SD295
+      shear: SD295
+      dt: 120
+      end:
+        top: 8-D22
+        bottom: 8-D25
+        stirrup: 4-D13@200
+      center:
+        top: 5-D22
+        bottom: 7-D22
+        stirrup: 4-D13@300
+  GX:
+    b: 1000
+    D: 1500
+    material: C24
+    cover: 100
+    rebar:
+      main: SD295
+      shear: SD295
+      dt: 120
+      end:
+        top: 7-D22
+        bottom: 7-D19
+        stirrup: 4-D13@200
+      center:
+        top: 5-D22
+        bottom: 7-D19
+        stirrup: 4-D13@300
+  P12:
+    pipe:
+      D: 1000
+      t: 12
+    material: STK50
+    corrosion:
+      outer: 0.0
+      inner: 0.0
+    stiffness: intact
+  P16:
+    pipe:
+      D: 1000
+      t: 16
+    material: STK50
+    corrosion:
+      outer: 0.0
+      inner: 0.0
+    stiffness: intact
+grids:
+  x:
+    P1: 0
+    P2: 5.4
+    P3: 10.8
+    P4: 16.2
+    P5: 21.6
+  y:
+    L: 0
+    C2: 4.5
+    C1: 9.0
+    S: 13.5
+deck:
+  top: 3.8
+  model_level: 2.9
+  soffit: 2.0
+  slab_thickness: 0.4
+  overhang:
+    sea: 1.4
+    land: 1.1
+    start: 2.2
+    end: 2.2
+unit_weight:
+  rc: 24.5
+beams:
+- at: '*'
+  section: GX
+- at:
+  - P1/L-S
+  - P2/L-S
+  - P3/L-S
+  - P4/L-S
+  - P5/L-S
+  section: GY
+piles:
+  section: P12
+  overrides:
+  - at: '*/S'
+    section: P16
+  model: soil_spring
+  segment: 0.5
+  rows:
+    L:
+      seabed: -4.8
+      tip: -41.0
+      layers: &id001
+      - bottom: -13.0
+        kh: 29000
+        pu: 600
+      - bottom: -25.0
+        kh: 15000
+        pu: 600
+      - bottom: -38.0
+        kh: 15000
+        pu: 600
+      - bottom: -60.0
+        kh: 44000
+        pu: 1200
+    C2:
+      seabed: -7.0
+      tip: -41.0
+      layers: *id001
+    C1:
+      seabed: -9.3
+      tip: -41.0
+      layers: *id001
+    S:
+      seabed: -12.1
+      tip: -41.0
+      layers: *id001
+actions:
+  D:
+    pavement: 0.0
+  L:
+    surcharge: 20.0
+  Ls:
+    surcharge: 10.0
+  EQ:
+    kh: 0.15
+    directions:
+    - y
+level2:
+  directions:
+  - +y
+  gravity:
+    D: 1.0
+    Ls: 1.0
+  kh: 0.25
+  max_displacement: 1.0
+  step: 0.01
+  post_yield_ratio: 0.001
+  inground_depth: 3.0
+  criteria:
+  - no_mechanism
+  - no_inground_plastic
+scenarios:
+  base:
+    direction: +y
+    shape: cos
+    order: simultaneous
+    bottom: -23.0
+    ecu: B
+  distributions:
+    surface_ratio:
+      choice:
+      - L: 1.0
+        C2: 1.0
+        C1: 1.0
+        S: 1.0
+      - L: 1.0
+        C2: 0.8
+        C1: 0.6
+        S: 0.4
+    kh_factor:
+      uniform:
+      - 0.05
+      - 0.2
+    pu_factor:
+      choice:
+      - 0.25
+      - 0.5
+      - 1.0
+    kh:
+      uniform:
+      - 0.0
+      - 0.15
+    surface:
+      lognormal:
+        median: 0.5
+        beta: 0.7
+    wall_ratio:
+      uniform:
+      - 0.5
+      - 1.5
+    settlement_ratio:
+      uniform:
+      - 0.2
+      - 0.6
+  deterioration:
+    age:
+    - 0
+    - 40
+    - 60
+    chloride:
+      C0:
+        lognormal:
+          median: 13.0
+          beta: 0.3
+      D:
+        lognormal:
+          median: 1.0
+          beta: 0.5
+      cover:
+        normal:
+          mean: 100.0
+          sd: 10.0
+      Clim:
+        lognormal:
+          median: 1.6
+          beta: 0.25
+      icorr:
+        lognormal:
+          median: 2.0
+          beta: 0.7
+      bar: 22
+    pile:
+      boundary: -1.0
+      head:
+        life:
+          lognormal:
+            median: 30.0
+            beta: 0.5
+        rate:
+          lognormal:
+            median: 0.2
+            beta: 0.4
+      sea:
+        life:
+          lognormal:
+            median: 30.0
+            beta: 0.5
+        rate:
+          lognormal:
+            median: 0.15
+            beta: 0.4
+        factor: 0.1
+      soil:
+        rate:
+          uniform:
+          - 0.02
+          - 0.04
+    scour:
+      depth:
+        lognormal:
+          median: 0.5
+          beta: 0.8
+      tau: 10.0
+      ratio:
+        S: 1.0
+        C1: 0.5
+  sample: 200
+  seed: 1
+  screening:
+    segment: 1.0
+  refine:
+    when:
+      pile_yield: true
+      residual:
+      - 0.05
+      - 3.0
+  workers: 4
+usability:
+  remove:
+  - Ls
+  limits:
+    pile_damage:
+      塑性化: limited
+      局部座屈: unusable
+    wall_move:
+      limited: 0.3
+      unusable: 0.5
+    apron_step:
+      limited: 0.1
+    bridge_opening:
+      limited: 0.2
+  allowable:
+    pile: plastic
+    deck_mu: true
+    pile_axial: false
+    fenders:
+    - x: 5.4
+      z: 2.8
+    - x: 16.2
+      z: 2.8
+    bollards:
+    - x: 10.8
+  retaining:
+    row: L
+  methods:
+    1-A:
+      phase: 1
+      label: 必要最小限の人員・物資の輸送（極めて慎重な作業、載荷重なし）
+      surcharge: 0
+      berthing: 500
+      tractive: 350
+    2-A:
+      phase: 2
+      label: 緊急物資の陸揚げ（地震時の載荷重）
+      surcharge: 10
+      berthing: 500
+      tractive: 350
+    3-C:
+      phase: 3
+      label: 災害前の日常的な利用（常時の載荷重）
+      surcharge: 20
+      berthing: 500
+      tractive: 350
+  required:
+    aftershock: 0.15

@@ -100,7 +100,8 @@ limits.deck_mu・pile_axial・pile_damage.杭頭の局部座屈）→ G2 済: �
 required.aftershock・limits.aftershock、列 allow_aftershock）→ G3 済: 利用方法ごとの判定（usability.methods、judge_detail、
 limits の段階 limited = フェーズ 2・3 不可・unusable = 全て不可、渡版・段差は緊急復旧の注意事項、列 methods_ok、
 区分 利用可／利用可（注意事項あり）／利用不可、旧い「制限付き利用」は final_rows で読み替え）
-→ G4: 再計算と報告書（図 D-8・D-9 相当、残留水平変位の閾値、表 A-1 の目安との比較）
+→ G4 済: 再計算と報告書（examples/kawasaki_guideline.py、報告書の章 sec_guideline・sec_indicator、load_study で判定をやり直す、
+allowable_loads は算定の間だけ本震の履歴を外す）
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
