@@ -102,6 +102,7 @@ limits の段階 limited = フェーズ 2・3 不可・unusable = 全て不可�
 区分 利用可／利用可（注意事項あり）／利用不可、旧い「制限付き利用」は final_rows で読み替え）
 → G4 済: 再計算と報告書（examples/kawasaki_guideline.py、報告書の章 sec_guideline・sec_indicator、load_study で判定をやり直す、
 allowable_loads は算定の間だけ本震の履歴を外す）
+→ テイルリスクの図（examples/kawasaki_tailrisk.py、matplotlib、G4 の results の CSV を読むだけ）。経緯と未解決の事項は docs/引き継ぎ.md
 
 ## 既知の簡略化
 - 柱の自動剛域は方向ごとの値の最小値を採用
